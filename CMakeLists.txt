@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(MFFrameSourceD3D12CameraCapture VERSION 0.4.0 LANGUAGES CXX)
+project(MFFrameSourceD3D12 VERSION 0.4.0 LANGUAGES CXX)
 
 option(MFFRAMESOURCE_BUILD_SAMPLE "Build MFFrameSource samples" ON)
 option(MFFRAMESOURCE_BUILD_TESTS "Build MFFrameSource tests" ON)
