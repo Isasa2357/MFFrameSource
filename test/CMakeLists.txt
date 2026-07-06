@@ -53,3 +53,29 @@ set_tests_properties(test_d3d12_camera_thread_smoke PROPERTIES
     LABELS "smoke;camera;d3d12;thread"
     ENVIRONMENT "MFFRAMESOURCE_D3D12_PROCESSING_SHADER_DIR=${MFFRAMESOURCE_D3D12_PROCESSING_SHADER_DIR}"
 )
+
+mfframesource_add_test(test_video_capture_state
+    test_video_capture_state.cpp
+)
+set_tests_properties(test_video_capture_state PROPERTIES LABELS "unit;video")
+
+mfframesource_add_test(test_video_thread_state
+    test_video_thread_state.cpp
+)
+set_tests_properties(test_video_thread_state PROPERTIES LABELS "unit;video;thread")
+
+mfframesource_add_test(test_d3d12_video_capture_smoke
+    test_d3d12_video_capture_smoke.cpp
+)
+set_tests_properties(test_d3d12_video_capture_smoke PROPERTIES
+    LABELS "smoke;video;d3d12"
+    ENVIRONMENT "MFFRAMESOURCE_D3D12_PROCESSING_SHADER_DIR=${MFFRAMESOURCE_D3D12_PROCESSING_SHADER_DIR}"
+)
+
+mfframesource_add_test(test_d3d12_video_thread_smoke
+    test_d3d12_video_thread_smoke.cpp
+)
+set_tests_properties(test_d3d12_video_thread_smoke PROPERTIES
+    LABELS "smoke;video;d3d12;thread"
+    ENVIRONMENT "MFFRAMESOURCE_D3D12_PROCESSING_SHADER_DIR=${MFFRAMESOURCE_D3D12_PROCESSING_SHADER_DIR}"
+)

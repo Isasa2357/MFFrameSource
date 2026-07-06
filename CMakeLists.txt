@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(MFFrameSourceD3D12CameraCapture VERSION 0.3.0 LANGUAGES CXX)
+project(MFFrameSourceD3D12CameraCapture VERSION 0.4.0 LANGUAGES CXX)
 
 option(MFFRAMESOURCE_BUILD_SAMPLE "Build MFFrameSource samples" ON)
 option(MFFRAMESOURCE_BUILD_TESTS "Build MFFrameSource tests" ON)
@@ -110,7 +110,10 @@ add_library(MFFrameSourceD3D12 STATIC
     src/MFD3D12CameraCapture.cpp
     src/MFD3D12CameraCaptureThread.cpp
     src/MFD3D12CameraSyncThread.cpp
+    src/MFD3D12VideoCapture.cpp
+    src/MFD3D12VideoCaptureThread.cpp
     src/internal/MFCpuSampleReader.cpp
+    src/internal/MFVideoFileSampleReader.cpp
     src/internal/MFD3D12UploadFramePool.cpp
     src/internal/MFD3D12FrameCloner.cpp
 )
@@ -208,7 +211,10 @@ if(MFFRAMESOURCE_BUILD_SAMPLE)
         d3d12_camera_read
         d3d12_camera_thread_read
         d3d12_camera_benchmark
-        d3d12_stereo_sync)
+        d3d12_stereo_sync
+        d3d12_video_read
+        d3d12_video_thread_read
+        d3d12_video_benchmark)
         add_executable(${sample_name} sample/${sample_name}.cpp)
         target_link_libraries(${sample_name} PRIVATE MFFrameSource::D3D12)
         mfframesource_copy_dxc_runtime(${sample_name})

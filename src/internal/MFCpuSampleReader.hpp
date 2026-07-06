@@ -39,6 +39,7 @@ public:
 
 private:
     friend class MFCpuSampleReader;
+    friend class MFVideoFileSampleReader;
 
     bool valid_ = false;
     ComPtr<IMFSample> sample_;

@@ -1,0 +1,330 @@
+#include "MFVideoFileSampleReader.hpp"
+
+#include "MFComUtil.hpp"
+
+#include <cstring>
+#include <mferror.h>
+#include <propvarutil.h>
+#include <sstream>
+#include <stdexcept>
+#include <string>
+
+namespace MFFrameSource::internal {
+namespace {
+
+constexpr DWORD kFirstVideoStream = static_cast<DWORD>(MF_SOURCE_READER_FIRST_VIDEO_STREAM);
+constexpr DWORD kAllStreams = static_cast<DWORD>(MF_SOURCE_READER_ALL_STREAMS);
+constexpr DWORD kMediaSource = static_cast<DWORD>(MF_SOURCE_READER_MEDIASOURCE);
+
+UINT64 RowBytes(DXGI_FORMAT format, UINT width) {
+    switch (format) {
+    case DXGI_FORMAT_NV12: return width;
+    case DXGI_FORMAT_P010: return static_cast<UINT64>(width) * 2;
+    case DXGI_FORMAT_R8G8B8A8_UNORM:
+    case DXGI_FORMAT_B8G8R8A8_UNORM: return static_cast<UINT64>(width) * 4;
+    default: return 0;
+    }
+}
+
+void CopyPitchedRows(std::vector<std::uint8_t>& dst,
+                     const std::uint8_t* src,
+                     LONG srcPitch,
+                     UINT64 rowBytes,
+                     UINT rows) {
+    const size_t base = dst.size();
+    dst.resize(base + static_cast<size_t>(rowBytes) * rows);
+    std::uint8_t* out = dst.data() + base;
+    for (UINT y = 0; y < rows; ++y) {
+        std::memcpy(out + static_cast<size_t>(y) * rowBytes,
+                    src + static_cast<std::ptrdiff_t>(y) * srcPitch,
+                    static_cast<size_t>(rowBytes));
+    }
+}
+
+std::wstring FormatRequestText(const MFCameraFormatRequest& request) {
+    std::wstringstream ss;
+    ss << L"width=" << request.width
+       << L" height=" << request.height
+       << L" fps=" << request.fps.numerator << L"/" << request.fps.denominator
+       << L" subtypeDxgi=" << DxgiFormatName(MfSubtypeToDxgiFormat(request.subtype));
+    return ss.str();
+}
+
+void SetExactVideoType(IMFMediaType* type, const MFCameraFormatRequest& request) {
+    ThrowIfFailed(type->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video), L"SetGUID(MF_MT_MAJOR_TYPE)");
+    ThrowIfFailed(type->SetGUID(MF_MT_SUBTYPE, request.subtype), L"SetGUID(MF_MT_SUBTYPE)");
+    ThrowIfFailed(MFSetAttributeSize(type, MF_MT_FRAME_SIZE, request.width, request.height), L"MFSetAttributeSize(MF_MT_FRAME_SIZE)");
+    ThrowIfFailed(MFSetAttributeRatio(type, MF_MT_FRAME_RATE, request.fps.numerator, request.fps.denominator), L"MFSetAttributeRatio(MF_MT_FRAME_RATE)");
+    ThrowIfFailed(type->SetUINT32(MF_MT_INTERLACE_MODE, static_cast<UINT32>(MFVideoInterlace_Progressive)), L"SetUINT32(MF_MT_INTERLACE_MODE)");
+}
+
+} // namespace
+
+MFVideoFileSampleReader::~MFVideoFileSampleReader() {
+    close();
+}
+
+void MFVideoFileSampleReader::open(const std::wstring& filePath, const MFVideoCaptureConfig& config) {
+    close();
+    if (filePath.empty()) {
+        throw std::runtime_error("MFVideoFileSampleReader::open: filePath is empty");
+    }
+    if (!config.input.isComplete()) {
+        throw std::runtime_error("MFVideoFileSampleReader::open: config.input must specify subtype, width, height, fps");
+    }
+    const DXGI_FORMAT requestedDxgi = MfSubtypeToDxgiFormat(config.input.subtype);
+    if (!IsSupportedCpuUploadInputFormat(requestedDxgi)) {
+        throw std::runtime_error("MFVideoFileSampleReader::open: requested subtype is not supported by CPU upload path");
+    }
+
+    filePath_ = filePath;
+
+    ComPtr<IMFAttributes> attrs;
+    ThrowIfFailed(MFCreateAttributes(&attrs, 6), L"MFCreateAttributes(video source reader)");
+    attrs->SetUINT32(MF_READWRITE_DISABLE_CONVERTERS, config.disableConverters ? TRUE : FALSE);
+    attrs->SetUINT32(MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, config.enableHardwareTransforms ? TRUE : FALSE);
+
+    ThrowIfFailed(MFCreateSourceReaderFromURL(filePath.c_str(), attrs.Get(), &reader_),
+                  L"MFCreateSourceReaderFromURL");
+    ThrowIfFailed(reader_->SetStreamSelection(kAllStreams, FALSE), L"SetStreamSelection(all false)");
+    ThrowIfFailed(reader_->SetStreamSelection(kFirstVideoStream, TRUE), L"SetStreamSelection(video true)");
+
+    readDurationAttribute();
+    configureExactDecodedFormat(config.input);
+
+    if (config.startPosition100ns > 0) {
+        if (!seek(config.startPosition100ns)) {
+            throw std::runtime_error("MFVideoFileSampleReader::open: failed to seek to startPosition100ns");
+        }
+    }
+}
+
+void MFVideoFileSampleReader::readDurationAttribute() noexcept {
+    duration100ns_ = -1;
+    if (!reader_) return;
+    PROPVARIANT var;
+    PropVariantInit(&var);
+    if (SUCCEEDED(reader_->GetPresentationAttribute(kMediaSource, MF_PD_DURATION, &var))) {
+        if (var.vt == VT_UI8) {
+            duration100ns_ = static_cast<std::int64_t>(var.uhVal.QuadPart);
+        } else if (var.vt == VT_I8) {
+            duration100ns_ = static_cast<std::int64_t>(var.hVal.QuadPart);
+        }
+    }
+    PropVariantClear(&var);
+}
+
+void MFVideoFileSampleReader::configureExactDecodedFormat(const MFCameraFormatRequest& request) {
+    ComPtr<IMFMediaType> desired;
+    ThrowIfFailed(MFCreateMediaType(&desired), L"MFCreateMediaType(decoded output)");
+    SetExactVideoType(desired.Get(), request);
+
+    HRESULT hr = reader_->SetCurrentMediaType(kFirstVideoStream, nullptr, desired.Get());
+    if (FAILED(hr)) {
+        std::wstringstream ss;
+        ss << L"SetCurrentMediaType failed for exact decoded output. Requested "
+           << FormatRequestText(request) << L". HRESULT=0x" << std::hex
+           << static_cast<unsigned long>(hr)
+           << L". The file may not be decodable to the requested CPU format without a converter/decoder.";
+        const auto msgw = ss.str();
+        throw std::runtime_error(std::string(msgw.begin(), msgw.end()));
+    }
+
+    ComPtr<IMFMediaType> actual;
+    ThrowIfFailed(reader_->GetCurrentMediaType(kFirstVideoStream, &actual), L"GetCurrentMediaType(decoded output)");
+
+    GUID subtype = GUID_NULL;
+    actual->GetGUID(MF_MT_SUBTYPE, &subtype);
+    UINT width = 0, height = 0;
+    ReadFrameSize(actual.Get(), width, height);
+    MFFrameRate fps = ReadFrameRate(actual.Get());
+    const DXGI_FORMAT dxgi = MfSubtypeToDxgiFormat(subtype);
+
+    if (!GuidEquals(subtype, request.subtype) || width != request.width || height != request.height || !(fps == request.fps)) {
+        std::wstringstream ss;
+        ss << L"Decoded video output does not exactly match request. Requested "
+           << FormatRequestText(request)
+           << L". Actual width=" << width
+           << L" height=" << height
+           << L" fps=" << fps.numerator << L"/" << fps.denominator
+           << L" subtypeDxgi=" << DxgiFormatName(dxgi);
+        const auto msgw = ss.str();
+        throw std::runtime_error(std::string(msgw.begin(), msgw.end()));
+    }
+
+    if (!IsSupportedCpuUploadInputFormat(dxgi)) {
+        throw std::runtime_error("MFVideoFileSampleReader::configureExactDecodedFormat: exact decoded output is unsupported by CPU upload path");
+    }
+
+    selectedFormat_.subtype = subtype;
+    selectedFormat_.dxgiFormat = dxgi;
+    selectedFormat_.width = width;
+    selectedFormat_.height = height;
+    selectedFormat_.fps = fps;
+}
+
+MFCpuSampleReadResult MFVideoFileSampleReader::read() {
+    MFCpuSampleReadResult result;
+    if (!reader_) {
+        result.status = MFFrameStatus::NotOpened;
+        result.error = MakeError(L"MFVideoFileSampleReader::read", L"reader is not opened");
+        return result;
+    }
+
+    try {
+        DWORD streamIndex = 0;
+        DWORD flags = 0;
+        LONGLONG sampleTime = -1;
+        ComPtr<IMFSample> sample;
+        HRESULT hr = reader_->ReadSample(kFirstVideoStream, 0,
+                                          &streamIndex, &flags, &sampleTime, &sample);
+        ThrowIfFailed(hr, L"IMFSourceReader::ReadSample(video)");
+
+        if (flags & MF_SOURCE_READERF_ENDOFSTREAM) {
+            result.status = MFFrameStatus::EndOfStream;
+            return result;
+        }
+        if (flags & MF_SOURCE_READERF_CURRENTMEDIATYPECHANGED) {
+            result.status = MFFrameStatus::FormatChanged;
+            result.error = MakeError(L"MFVideoFileSampleReader::read", L"current media type changed");
+            return result;
+        }
+        if (flags & MF_SOURCE_READERF_ERROR) {
+            result.status = MFFrameStatus::Error;
+            result.error = MakeError(L"MFVideoFileSampleReader::read", L"MF_SOURCE_READERF_ERROR was returned");
+            return result;
+        }
+        if (!sample) {
+            result.status = MFFrameStatus::NoSample;
+            return result;
+        }
+
+        LONGLONG duration = -1;
+        sample->GetSampleDuration(&duration);
+        result.sample = lockSample(sample.Get(), sampleTime, duration);
+        result.status = MFFrameStatus::Ok;
+        return result;
+    } catch (const HResultException& e) {
+        result.status = MFFrameStatus::Error;
+        result.error = MakeError(e.hr(), e.where());
+        return result;
+    } catch (const std::exception& e) {
+        result.status = MFFrameStatus::Error;
+        result.error = MakeError(L"MFVideoFileSampleReader::read", Utf8ToWide(e.what()));
+        return result;
+    }
+}
+
+bool MFVideoFileSampleReader::seek(std::int64_t position100ns) {
+    if (!reader_) return false;
+    if (position100ns < 0) position100ns = 0;
+
+    PROPVARIANT var;
+    PropVariantInit(&var);
+    var.vt = VT_I8;
+    var.hVal.QuadPart = position100ns;
+    const HRESULT hr = reader_->SetCurrentPosition(GUID_NULL, var);
+    PropVariantClear(&var);
+    return SUCCEEDED(hr);
+}
+
+MFCpuVideoSample MFVideoFileSampleReader::lockSample(IMFSample* sample, LONGLONG sampleTime, LONGLONG sampleDuration) {
+    MFCpuVideoSample out;
+    out.sample_ = sample;
+    out.dxgiFormat = selectedFormat_.dxgiFormat;
+    out.mfSubtype = selectedFormat_.subtype;
+    out.width = selectedFormat_.width;
+    out.height = selectedFormat_.height;
+    out.sampleTime100ns = sampleTime;
+    out.sampleDuration100ns = sampleDuration;
+    out.acquiredTime = std::chrono::steady_clock::now();
+
+    DWORD bufferCount = 0;
+    ThrowIfFailed(sample->GetBufferCount(&bufferCount), L"IMFSample::GetBufferCount(video)");
+    if (bufferCount == 0) {
+        throw std::runtime_error("video sample has no media buffer");
+    }
+    if (bufferCount == 1) {
+        ThrowIfFailed(sample->GetBufferByIndex(0, &out.buffer_), L"IMFSample::GetBufferByIndex(video)");
+    } else {
+        ThrowIfFailed(sample->ConvertToContiguousBuffer(&out.buffer_), L"IMFSample::ConvertToContiguousBuffer(video)");
+    }
+
+    if (SUCCEEDED(out.buffer_.As(&out.buffer2d_)) && out.buffer2d_) {
+        ThrowIfFailed(out.buffer2d_->Lock2D(&out.lockPtr_, &out.lockPitch_), L"IMF2DBuffer::Lock2D(video)");
+        out.locked2d_ = true;
+
+        const UINT64 row0 = RowBytes(out.dxgiFormat, out.width);
+        if (row0 == 0) throw std::runtime_error("unsupported DXGI format in video Lock2D");
+
+        if (out.dxgiFormat == DXGI_FORMAT_NV12 || out.dxgiFormat == DXGI_FORMAT_P010) {
+            if (out.lockPitch_ <= 0) {
+                throw std::runtime_error("negative pitch planar video IMF2DBuffer is unsupported");
+            }
+            if (static_cast<UINT64>(out.lockPitch_) < row0) {
+                throw std::runtime_error("planar video IMF2DBuffer pitch is smaller than row bytes");
+            }
+            out.planeCount = 2;
+            out.planes[0].data = out.lockPtr_;
+            out.planes[0].rowPitch = static_cast<UINT64>(out.lockPitch_);
+            out.planes[0].slicePitch = static_cast<UINT64>(out.lockPitch_) * out.height;
+            out.planes[1].data = out.lockPtr_ + static_cast<size_t>(out.lockPitch_) * out.height;
+            out.planes[1].rowPitch = static_cast<UINT64>(out.lockPitch_);
+            out.planes[1].slicePitch = static_cast<UINT64>(out.lockPitch_) * (out.height / 2);
+        } else {
+            const UINT rows = out.height;
+            if (out.lockPitch_ > 0 && static_cast<UINT64>(out.lockPitch_) >= row0) {
+                out.planeCount = 1;
+                out.planes[0].data = out.lockPtr_;
+                out.planes[0].rowPitch = static_cast<UINT64>(out.lockPitch_);
+                out.planes[0].slicePitch = static_cast<UINT64>(out.lockPitch_) * rows;
+            } else {
+                CopyPitchedRows(out.owned_, out.lockPtr_, out.lockPitch_, row0, rows);
+                out.unlock();
+                out.planeCount = 1;
+                out.planes[0].data = out.owned_.data();
+                out.planes[0].rowPitch = row0;
+                out.planes[0].slicePitch = row0 * rows;
+            }
+        }
+    } else {
+        BYTE* ptr = nullptr;
+        DWORD maxLen = 0, curLen = 0;
+        ThrowIfFailed(out.buffer_->Lock(&ptr, &maxLen, &curLen), L"IMFMediaBuffer::Lock(video)");
+        out.lockPtr_ = ptr;
+        out.lockMaxLen_ = maxLen;
+        out.lockCurLen_ = curLen;
+        out.lockedMediaBuffer_ = true;
+
+        const UINT64 expected = ExpectedTightImageBytes(out.dxgiFormat, out.width, out.height);
+        if (expected == 0 || curLen < expected) {
+            throw std::runtime_error("video non-2D media buffer is smaller than expected tight image size");
+        }
+        if (curLen != expected) {
+            throw std::runtime_error("video non-2D media buffer has non-tight stride; IMF2DBuffer is required");
+        }
+
+        const UINT64 row0 = RowBytes(out.dxgiFormat, out.width);
+        out.planeCount = DxgiPlaneCount(out.dxgiFormat);
+        out.planes[0].data = ptr;
+        out.planes[0].rowPitch = row0;
+        out.planes[0].slicePitch = row0 * out.height;
+        if (out.planeCount == 2) {
+            out.planes[1].data = ptr + out.planes[0].slicePitch;
+            out.planes[1].rowPitch = row0;
+            out.planes[1].slicePitch = row0 * (out.height / 2);
+        }
+    }
+
+    out.valid_ = true;
+    return out;
+}
+
+void MFVideoFileSampleReader::close() noexcept {
+    if (reader_) reader_.Reset();
+    selectedFormat_ = {};
+    filePath_.clear();
+    duration100ns_ = -1;
+}
+
+} // namespace MFFrameSource::internal
