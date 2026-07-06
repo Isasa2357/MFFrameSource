@@ -91,17 +91,18 @@ public:
             const double sy = static_cast<double>(maxClientH) / static_cast<double>(imageHeight);
             scale = std::min(sx, sy);
         }
-        const int clientW = std::max(1, static_cast<int>(imageWidth * scale));
-        const int clientH = std::max(1, static_cast<int>(imageHeight * scale));
+        previewWidth_ = std::max<UINT>(1, static_cast<UINT>(imageWidth * scale));
+        previewHeight_ = std::max<UINT>(1, static_cast<UINT>(imageHeight * scale));
 
-        RECT rc{0, 0, clientW, clientH};
-        AdjustWindowRect(&rc, WS_OVERLAPPEDWINDOW, FALSE);
+        RECT rc{0, 0, static_cast<LONG>(previewWidth_), static_cast<LONG>(previewHeight_)};
+        const DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
+        AdjustWindowRect(&rc, style, FALSE);
 
         hwnd_ = CreateWindowExW(
             0,
             className,
             L"MFFrameSource stereo preview",
-            WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+            style | WS_VISIBLE,
             CW_USEDEFAULT,
             CW_USEDEFAULT,
             rc.right - rc.left,
@@ -140,15 +141,63 @@ public:
 
     bool present(const std::vector<std::uint8_t>& bgra, UINT width, UINT height) {
         if (!hwnd_ || closed_) return false;
-        image_ = bgra;
-        imageWidth_ = width;
-        imageHeight_ = height;
+        if (width == previewWidth_ && height == previewHeight_) {
+            image_ = bgra;
+        } else {
+            downscaleBgraBox(bgra, width, height, image_, previewWidth_, previewHeight_);
+        }
+        imageWidth_ = previewWidth_;
+        imageHeight_ = previewHeight_;
         InvalidateRect(hwnd_, nullptr, FALSE);
         UpdateWindow(hwnd_);
         return processMessages();
     }
 
 private:
+    static void downscaleBgraBox(const std::vector<std::uint8_t>& src,
+                                 UINT srcW,
+                                 UINT srcH,
+                                 std::vector<std::uint8_t>& dst,
+                                 UINT dstW,
+                                 UINT dstH) {
+        if (src.size() != static_cast<std::size_t>(srcW) * srcH * 4u) {
+            throw std::runtime_error("StereoPreviewWindow: unexpected source preview buffer size");
+        }
+        dst.resize(static_cast<std::size_t>(dstW) * dstH * 4u);
+        const double scaleX = static_cast<double>(srcW) / static_cast<double>(dstW);
+        const double scaleY = static_cast<double>(srcH) / static_cast<double>(dstH);
+
+        for (UINT y = 0; y < dstH; ++y) {
+            const UINT y0 = std::min<UINT>(srcH - 1, static_cast<UINT>(y * scaleY));
+            const UINT y1 = std::min<UINT>(srcH - 1, std::max<UINT>(y0, static_cast<UINT>((y + 1) * scaleY)));
+            for (UINT x = 0; x < dstW; ++x) {
+                const UINT x0 = std::min<UINT>(srcW - 1, static_cast<UINT>(x * scaleX));
+                const UINT x1 = std::min<UINT>(srcW - 1, std::max<UINT>(x0, static_cast<UINT>((x + 1) * scaleX)));
+                std::uint32_t b = 0;
+                std::uint32_t g = 0;
+                std::uint32_t r = 0;
+                std::uint32_t a = 0;
+                std::uint32_t count = 0;
+                for (UINT sy = y0; sy <= y1; ++sy) {
+                    const auto* srcRow = src.data() + static_cast<std::size_t>(sy) * srcW * 4u;
+                    for (UINT sx = x0; sx <= x1; ++sx) {
+                        const auto* s = srcRow + static_cast<std::size_t>(sx) * 4u;
+                        b += s[0];
+                        g += s[1];
+                        r += s[2];
+                        a += s[3];
+                        ++count;
+                    }
+                }
+                auto* d = dst.data() + (static_cast<std::size_t>(y) * dstW + x) * 4u;
+                d[0] = static_cast<std::uint8_t>(b / count);
+                d[1] = static_cast<std::uint8_t>(g / count);
+                d[2] = static_cast<std::uint8_t>(r / count);
+                d[3] = static_cast<std::uint8_t>(a / count);
+            }
+        }
+    }
+
     static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         StereoPreviewWindow* self = nullptr;
         if (msg == WM_NCCREATE) {
@@ -189,31 +238,35 @@ private:
         PAINTSTRUCT ps{};
         HDC hdc = BeginPaint(hwnd, &ps);
         if (!image_.empty() && imageWidth_ != 0 && imageHeight_ != 0) {
-            RECT rc{};
-            GetClientRect(hwnd, &rc);
+            // The preview image is already converted to the window resolution by
+            // a CPU box filter.  Do not ask GDI to scale the full 3840x1080
+            // stereo canvas: GDI scaling can add strong dithering/aliasing noise
+            // on some display drivers.  Draw 1:1 instead.
+            BITMAPV5HEADER bmi{};
+            bmi.bV5Size = sizeof(BITMAPV5HEADER);
+            bmi.bV5Width = static_cast<LONG>(imageWidth_);
+            bmi.bV5Height = -static_cast<LONG>(imageHeight_); // top-down
+            bmi.bV5Planes = 1;
+            bmi.bV5BitCount = 32;
+            bmi.bV5Compression = BI_BITFIELDS;
+            bmi.bV5RedMask = 0x00FF0000;
+            bmi.bV5GreenMask = 0x0000FF00;
+            bmi.bV5BlueMask = 0x000000FF;
+            bmi.bV5AlphaMask = 0xFF000000;
 
-            BITMAPINFO bmi{};
-            bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-            bmi.bmiHeader.biWidth = static_cast<LONG>(imageWidth_);
-            bmi.bmiHeader.biHeight = -static_cast<LONG>(imageHeight_); // top-down
-            bmi.bmiHeader.biPlanes = 1;
-            bmi.bmiHeader.biBitCount = 32;
-            bmi.bmiHeader.biCompression = BI_RGB;
-
-            StretchDIBits(
+            SetDIBitsToDevice(
                 hdc,
                 0,
                 0,
-                rc.right - rc.left,
-                rc.bottom - rc.top,
+                imageWidth_,
+                imageHeight_,
                 0,
                 0,
-                static_cast<int>(imageWidth_),
-                static_cast<int>(imageHeight_),
+                0,
+                imageHeight_,
                 image_.data(),
-                &bmi,
-                DIB_RGB_COLORS,
-                SRCCOPY);
+                reinterpret_cast<const BITMAPINFO*>(&bmi),
+                DIB_RGB_COLORS);
         }
         EndPaint(hwnd, &ps);
     }
@@ -221,6 +274,8 @@ private:
     HINSTANCE hinstance_ = nullptr;
     HWND hwnd_ = nullptr;
     bool closed_ = false;
+    UINT previewWidth_ = 0;
+    UINT previewHeight_ = 0;
     UINT imageWidth_ = 0;
     UINT imageHeight_ = 0;
     std::vector<std::uint8_t> image_;

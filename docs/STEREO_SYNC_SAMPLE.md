@@ -1,6 +1,8 @@
 # d3d12_stereo_sync sample
 
-`d3d12_stereo_sync` captures two Media Foundation camera streams, synchronizes them by timestamp, shows a preview window, and writes a horizontally concatenated stereo MP4.
+This sample opens two Media Foundation cameras through the D3D12 backend, pairs
+frames by timestamp, previews the left/right concatenated image, and optionally
+records the concatenated stream as H.264/MP4.
 
 ## Usage
 
@@ -15,29 +17,20 @@ Example:
 out\build\default\Debug\d3d12_stereo_sync.exe 0 1 1920 1080 60 1 NV12 out\build\default\_deps\d3d12helper-src\shaders\D3D12Processing 300 stereo_sync_output.mp4 50000000
 ```
 
-## Arguments
+`outputMp4` can be `-` to disable recording.
 
-| Argument | Meaning |
-|---|---|
-| `leftIndex` | Media Foundation device index for the left camera. |
-| `rightIndex` | Media Foundation device index for the right camera. |
-| `width` / `height` | Exact input format size requested from both cameras. |
-| `fpsNum` / `fpsDen` | Exact input frame rate requested from both cameras. |
-| `subtype` | `NV12`, `P010`, `RGB32`, or `ARGB32`. |
-| `shaderDir` | D3D12Helper `shaders/D3D12Processing` directory. |
-| `pairCount` | Number of synchronized stereo pairs to process. Default: `120`. |
-| `outputMp4` | Output MP4 path. Default: `stereo_sync_output.mp4`. Use `-` to disable writing. |
-| `bitrate` | H.264 output bitrate. Default: `50000000`. |
+## Preview colour handling
 
-## Output format
+The preview path reads the final D3D12 RGBA8 resources back to a CPU BGRA8
+canvas.  The MP4 writer receives that full-resolution canvas as Media
+Foundation RGB32.
 
-The preview and MP4 writer use CPU readback from the owned D3D12 RGBA8 output textures. The sample converts the left and right RGBA8 resources to a single top-down RGB32/BGRA CPU image:
+For the window preview, the full stereo canvas is first downsampled to the
+actual preview-window size by a CPU box filter, and then drawn to GDI at 1:1
+using explicit BGRA bit masks.  This avoids the strong dithering/aliasing noise
+that can appear when `StretchDIBits` or display-driver GDI paths scale a large
+3840x1080 stereo image directly into a smaller preview window.
 
-```txt
-[left RGBA8 D3D12 resource] + [right RGBA8 D3D12 resource]
-        -> CPU BGRA canvas: width = leftWidth * 2, height = leftHeight
-        -> Win32 preview window
-        -> Media Foundation Sink Writer H.264 MP4
-```
-
-This readback/encode path is intentionally sample-local. It does not change the library API, which still returns owned native D3D12 resources.
+This is still only a debugging preview.  A production-quality realtime preview
+should render the D3D12 textures to a DXGI swap chain on the GPU instead of
+using CPU readback + GDI.
