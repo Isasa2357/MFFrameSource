@@ -10,6 +10,14 @@ Repository:
 https://github.com/Isasa2357/MFFrameSource.git
 ```
 
+## Version / dependency pins
+
+- 現在の `main` の状態を `v1.0.0` baseline として扱います。
+- この更新ブランチの CMake project version は `1.0.1` です。
+- `FetchContent` で取得する `D3D12Helper` は、`main` ではなく明示的に `v1.11.0` を指定します。
+- `D3D12Helper` は今後も更新される可能性があるため、再現性が必要な通常ビルドでは `MFFRAMESOURCE_D3D12HELPER_GIT_TAG` をタグまたは commit SHA に固定してください。
+- `D3D11Helper` は現時点の MFFrameSource には直接リンクしていません。D3D11 backend を追加する場合は、その時点で確認できる最新タグを明示的に指定して取り込んでください。
+
 ## 実装済みの範囲
 
 ### Camera input
@@ -69,10 +77,10 @@ https://github.com/Isasa2357/MFFrameSource.git
 
 FetchContent を使う場合、configure 時に以下を取得します。
 
-- `https://github.com/Isasa2357/D3D12Helper.git`
+- `https://github.com/Isasa2357/D3D12Helper.git` at `v1.11.0`
 - `https://github.com/Isasa2357/ThreadKit.git`
 
-ローカル checkout を使う場合は、`D3D12HELPER_ROOT` と `THREADKIT_ROOT` を指定できます。
+ローカル checkout を使う場合は、`D3D12HELPER_ROOT` と `THREADKIT_ROOT` を指定できます。再現性を重視する場合、ローカルの `D3D12HELPER_ROOT` も `v1.11.0` に checkout してください。
 
 ## Build
 
@@ -98,6 +106,13 @@ cmake -S . -B out/build/default -G "Visual Studio 17 2022" -A x64 ^
 cmake --build out/build/default --config Debug
 
 ctest --test-dir out/build/default -C Debug --output-on-failure
+```
+
+依存タグを明示的に上書きする場合:
+
+```bat
+cmake -S . -B out/build/default -G "Visual Studio 17 2022" -A x64 ^
+  -DMFFRAMESOURCE_D3D12HELPER_GIT_TAG=v1.11.0
 ```
 
 ## Install
@@ -264,15 +279,7 @@ ctest --test-dir out/build/default -C Debug -R video --output-on-failure
 - D3D11 backend
 - D3D11/D3D12 shared GPU sample path
 - GPU hardware decode surface を D3D12 へ直接受ける path
-- video writer / encoder
+- library API としての video writer / encoder
 - YUY2 / UYVY / I420 / YV12 などの追加 converter
 
 NV12 / P010 / RGB32 / ARGB32 を D3D12 RGBA8 resource として取り出す用途では、camera / video / thread / sync / benchmark まで実装済みです。
-
-## Commit
-
-```bat
-git add .
-git commit -m "docs: finalize D3D12 backend documentation"
-git push
-```
