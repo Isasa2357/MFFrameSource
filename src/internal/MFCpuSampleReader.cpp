@@ -32,6 +32,14 @@ UINT PlaneRows(DXGI_FORMAT format, UINT plane, UINT height) {
     return 0;
 }
 
+CpuPlaneView MakePlaneView(const void* data, UINT64 rowPitch, UINT rows) {
+    CpuPlaneView p;
+    p.data = data;
+    p.rowPitch = rowPitch;
+    p.slicePitch = rowPitch * rows;
+    return p;
+}
+
 void CopyPitchedRows(std::vector<std::uint8_t>& dst,
                      const std::uint8_t* src,
                      LONG srcPitch,
@@ -278,20 +286,17 @@ MFCpuVideoSample MFCpuSampleReader::lockSample(IMFSample* sample, LONGLONG sampl
 
         const UINT64 rowBytes = RowBytes(out.dxgiFormat, out.width);
         if (rowBytes == 0 || !out.lockPtr_) throw std::runtime_error("unsupported locked sample layout");
+        if (out.lockPitch_ < 0) throw std::runtime_error("negative sample pitch is not supported");
+        const UINT64 rowPitch = static_cast<UINT64>(out.lockPitch_);
 
-        out.planes[0].data = out.lockPtr_;
-        out.planes[0].rowBytes = rowBytes;
-        out.planes[0].pitch = out.lockPitch_;
-        out.planes[0].rows = PlaneRows(out.dxgiFormat, 0, out.height);
+        const UINT yRows = PlaneRows(out.dxgiFormat, 0, out.height);
+        out.planes[0] = MakePlaneView(out.lockPtr_, rowPitch, yRows);
         out.planeCount = 1;
 
         if (out.dxgiFormat == DXGI_FORMAT_NV12 || out.dxgiFormat == DXGI_FORMAT_P010) {
-            const UINT yRows = out.height;
-            std::uint8_t* uv = out.lockPtr_ + static_cast<std::ptrdiff_t>(out.lockPitch_) * yRows;
-            out.planes[1].data = uv;
-            out.planes[1].rowBytes = rowBytes;
-            out.planes[1].pitch = out.lockPitch_;
-            out.planes[1].rows = PlaneRows(out.dxgiFormat, 1, out.height);
+            const UINT yRowsForOffset = out.height;
+            std::uint8_t* uv = out.lockPtr_ + static_cast<std::ptrdiff_t>(out.lockPitch_) * yRowsForOffset;
+            out.planes[1] = MakePlaneView(uv, rowPitch, PlaneRows(out.dxgiFormat, 1, out.height));
             out.planeCount = 2;
         }
         out.valid_ = true;
@@ -309,6 +314,10 @@ MFCpuVideoSample MFCpuSampleReader::lockSample(IMFSample* sample, LONGLONG sampl
             BYTE* scan0 = nullptr;
             LONG pitch = 0;
             ThrowIfFailed(b2d->Lock2D(&scan0, &pitch), L"IMF2DBuffer::Lock2D(split)");
+            if (pitch < 0) {
+                b2d->Unlock2D();
+                throw std::runtime_error("negative split sample pitch is not supported");
+            }
             const UINT rows = (b == 0) ? PlaneRows(out.dxgiFormat, 0, out.height) : PlaneRows(out.dxgiFormat, 1, out.height);
             CopyPitchedRows(out.owned_, scan0, pitch, RowBytes(out.dxgiFormat, out.width), rows);
             b2d->Unlock2D();
@@ -322,16 +331,14 @@ MFCpuVideoSample MFCpuSampleReader::lockSample(IMFSample* sample, LONGLONG sampl
     }
     out.lockPtr_ = out.owned_.data();
     out.lockPitch_ = static_cast<LONG>(RowBytes(out.dxgiFormat, out.width));
-    out.planes[0].data = out.lockPtr_;
-    out.planes[0].rowBytes = RowBytes(out.dxgiFormat, out.width);
-    out.planes[0].pitch = out.lockPitch_;
-    out.planes[0].rows = PlaneRows(out.dxgiFormat, 0, out.height);
+    const UINT64 tightPitch = static_cast<UINT64>(out.lockPitch_);
+    out.planes[0] = MakePlaneView(out.lockPtr_, tightPitch, PlaneRows(out.dxgiFormat, 0, out.height));
     out.planeCount = 1;
     if (out.dxgiFormat == DXGI_FORMAT_NV12 || out.dxgiFormat == DXGI_FORMAT_P010) {
-        out.planes[1].data = out.lockPtr_ + static_cast<size_t>(out.lockPitch_) * out.height;
-        out.planes[1].rowBytes = RowBytes(out.dxgiFormat, out.width);
-        out.planes[1].pitch = out.lockPitch_;
-        out.planes[1].rows = PlaneRows(out.dxgiFormat, 1, out.height);
+        out.planes[1] = MakePlaneView(
+            out.lockPtr_ + static_cast<size_t>(out.lockPitch_) * out.height,
+            tightPitch,
+            PlaneRows(out.dxgiFormat, 1, out.height));
         out.planeCount = 2;
     }
     out.valid_ = true;
