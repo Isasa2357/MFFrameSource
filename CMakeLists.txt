@@ -15,10 +15,10 @@ set(D3D12HELPER_ROOT "" CACHE PATH "Optional local D3D12Helper repository root. 
 set(THREADKIT_ROOT "" CACHE PATH "Optional local ThreadKit repository root. Usually leave empty; FetchContent is used by default.")
 set(MFFRAMESOURCE_D3D11HELPER_GIT_REPOSITORY "https://github.com/Isasa2357/D3D11Helper.git" CACHE STRING "D3D11Helper Git repository")
 set(MFFRAMESOURCE_D3D12HELPER_GIT_REPOSITORY "https://github.com/Isasa2357/D3D12Helper.git" CACHE STRING "D3D12Helper Git repository")
-# Pin to the newest confirmed release tags at the time this branch was created.
+# Pin to the newest confirmed release tags at the time this branch was updated.
 # Do not leave these on main; D3DHelper repositories may continue to change independently.
-set(MFFRAMESOURCE_D3D11HELPER_GIT_TAG "v1.11.0" CACHE STRING "D3D11Helper Git ref/tag/commit to fetch")
-set(MFFRAMESOURCE_D3D12HELPER_GIT_TAG "v1.11.0" CACHE STRING "D3D12Helper Git ref/tag/commit to fetch")
+set(MFFRAMESOURCE_D3D11HELPER_GIT_TAG "v1.12.0" CACHE STRING "D3D11Helper Git ref/tag/commit to fetch")
+set(MFFRAMESOURCE_D3D12HELPER_GIT_TAG "v1.12.0" CACHE STRING "D3D12Helper Git ref/tag/commit to fetch")
 set(MFFRAMESOURCE_THREADKIT_GIT_REPOSITORY "https://github.com/Isasa2357/ThreadKit.git" CACHE STRING "ThreadKit Git repository")
 set(MFFRAMESOURCE_THREADKIT_GIT_TAG "main" CACHE STRING "ThreadKit Git ref/tag/commit to fetch")
 
