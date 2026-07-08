@@ -15,8 +15,9 @@ https://github.com/Isasa2357/MFFrameSource.git
 - `main` の `d18e560f4e43f568e94b03cdfde245548293b686` を `v1.0.0` baseline として扱います。
 - この更新ブランチの CMake project version は `1.1.0` です。
 - `v1.1.0` のゴールは、新 D3DHelper 対応と D3D11 backend の追加です。
-- `FetchContent` で取得する `D3D11Helper` / `D3D12Helper` は、`main` ではなく明示的に `v1.11.0` を指定します。
+- `FetchContent` で取得する `D3D11Helper` / `D3D12Helper` は、`main` ではなく明示的に `v1.12.0` を指定します。
 - D3DHelper は今後も更新される可能性があるため、再現性が必要な通常ビルドでは `MFFRAMESOURCE_D3D11HELPER_GIT_TAG` / `MFFRAMESOURCE_D3D12HELPER_GIT_TAG` をタグまたは commit SHA に固定してください。
+- D3DHelper `v1.12.0` では Advanced Processing が追加されていますが、MFFrameSource の capture path は引き続き Fused convert/resize path を使います。
 
 ## Backend overview
 
@@ -104,11 +105,11 @@ ARGB32
 
 FetchContent を使う場合、configure 時に以下を取得します。
 
-- `https://github.com/Isasa2357/D3D11Helper.git` at `v1.11.0`
-- `https://github.com/Isasa2357/D3D12Helper.git` at `v1.11.0`
+- `https://github.com/Isasa2357/D3D11Helper.git` at `v1.12.0`
+- `https://github.com/Isasa2357/D3D12Helper.git` at `v1.12.0`
 - `https://github.com/Isasa2357/ThreadKit.git`
 
-ローカル checkout を使う場合は、`D3D11HELPER_ROOT`、`D3D12HELPER_ROOT`、`THREADKIT_ROOT` を指定できます。再現性を重視する場合、ローカルの D3DHelper も `v1.11.0` に checkout してください。
+ローカル checkout を使う場合は、`D3D11HELPER_ROOT`、`D3D12HELPER_ROOT`、`THREADKIT_ROOT` を指定できます。再現性を重視する場合、ローカルの D3DHelper も `v1.12.0` に checkout してください。
 
 ## Build
 
@@ -145,8 +146,8 @@ ctest --test-dir out/build/default -C Debug --output-on-failure
 
 ```bat
 cmake -S . -B out/build/default -G "Visual Studio 17 2022" -A x64 ^
-  -DMFFRAMESOURCE_D3D11HELPER_GIT_TAG=v1.11.0 ^
-  -DMFFRAMESOURCE_D3D12HELPER_GIT_TAG=v1.11.0
+  -DMFFRAMESOURCE_D3D11HELPER_GIT_TAG=v1.12.0 ^
+  -DMFFRAMESOURCE_D3D12HELPER_GIT_TAG=v1.12.0
 ```
 
 D3D11 backend だけをビルドする場合:
