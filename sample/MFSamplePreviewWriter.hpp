@@ -10,7 +10,7 @@
 #include <MFFrameSource/MFD3D12CameraCapture.hpp>
 
 #include <D3D12Helper/D3D12Core/D3D12Core.hpp>
-#include <D3D12Helper/D3D12Framework/D3D12Resource.hpp>
+#include <D3D12Helper/D3D12Gpu/D3D12TextureTransfer.hpp>
 
 #include <Windows.h>
 #include <d3d12.h>
@@ -45,10 +45,6 @@ inline void ThrowIfFailed(HRESULT hr, const char* where) {
     }
 }
 
-inline UINT AlignUp(UINT value, UINT alignment) {
-    return (value + alignment - 1) & ~(alignment - 1);
-}
-
 struct BgraImage {
     UINT width = 0;
     UINT height = 0;
@@ -58,126 +54,56 @@ struct BgraImage {
     bool empty() const noexcept { return pixels.empty() || width == 0 || height == 0 || stride == 0; }
 };
 
+inline bool IsSupportedPreviewFormat(DXGI_FORMAT format) noexcept {
+    return format == DXGI_FORMAT_R8G8B8A8_UNORM ||
+           format == DXGI_FORMAT_B8G8R8A8_UNORM ||
+           format == DXGI_FORMAT_R8G8B8A8_UNORM_SRGB ||
+           format == DXGI_FORMAT_B8G8R8A8_UNORM_SRGB;
+}
+
+inline bool IsBgraPreviewFormat(DXGI_FORMAT format) noexcept {
+    return format == DXGI_FORMAT_B8G8R8A8_UNORM ||
+           format == DXGI_FORMAT_B8G8R8A8_UNORM_SRGB;
+}
+
 inline BgraImage ReadD3D12FrameToBgra(
     D3D12CoreLib::D3D12Core& core,
     MFFrameSource::MFD3D12CameraFrame& frame) {
 
     frame.waitReady();
 
-    auto& resource = frame.resource();
-    ID3D12Resource* texture = resource.Get();
-    if (!texture) {
-        throw std::runtime_error("ReadD3D12FrameToBgra: null texture");
+    const D3D12CoreLib::D3D12CpuImage image =
+        D3D12CoreLib::ReadbackTexture2DToCpuImage(core, frame.resource());
+    if (image.Empty() || image.planes.empty()) {
+        throw std::runtime_error("ReadD3D12FrameToBgra: empty readback image");
     }
-
-    const auto desc = texture->GetDesc();
-    if (desc.Dimension != D3D12_RESOURCE_DIMENSION_TEXTURE2D) {
-        throw std::runtime_error("ReadD3D12FrameToBgra: expected Texture2D");
-    }
-    if (desc.Format != DXGI_FORMAT_R8G8B8A8_UNORM &&
-        desc.Format != DXGI_FORMAT_B8G8R8A8_UNORM &&
-        desc.Format != DXGI_FORMAT_R8G8B8A8_UNORM_SRGB &&
-        desc.Format != DXGI_FORMAT_B8G8R8A8_UNORM_SRGB) {
+    if (!IsSupportedPreviewFormat(image.format)) {
         throw std::runtime_error("ReadD3D12FrameToBgra: expected RGBA8/BGRA8 output texture");
     }
 
-    auto* device = core.GetDevice();
-
-    D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint{};
-    UINT numRows = 0;
-    UINT64 rowSizeBytes = 0;
-    UINT64 totalBytes = 0;
-    device->GetCopyableFootprints(&desc, 0, 1, 0, &footprint, &numRows, &rowSizeBytes, &totalBytes);
-
-    D3D12_HEAP_PROPERTIES heapProps{};
-    heapProps.Type = D3D12_HEAP_TYPE_READBACK;
-
-    D3D12_RESOURCE_DESC bufferDesc{};
-    bufferDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
-    bufferDesc.Alignment = 0;
-    bufferDesc.Width = totalBytes;
-    bufferDesc.Height = 1;
-    bufferDesc.DepthOrArraySize = 1;
-    bufferDesc.MipLevels = 1;
-    bufferDesc.Format = DXGI_FORMAT_UNKNOWN;
-    bufferDesc.SampleDesc.Count = 1;
-    bufferDesc.SampleDesc.Quality = 0;
-    bufferDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
-    bufferDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
-
-    ComPtr<ID3D12Resource> readback;
-    ThrowIfFailed(device->CreateCommittedResource(
-        &heapProps,
-        D3D12_HEAP_FLAG_NONE,
-        &bufferDesc,
-        D3D12_RESOURCE_STATE_COPY_DEST,
-        nullptr,
-        IID_PPV_ARGS(readback.GetAddressOf())),
-        "CreateCommittedResource(readback)");
-
-    auto ctx = core.CreateDirectContext();
-    ctx.Reset();
-
-    const auto beforeState = resource.GetState();
-    if (beforeState != D3D12_RESOURCE_STATE_COPY_SOURCE) {
-        D3D12_RESOURCE_BARRIER barrier{};
-        barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-        barrier.Transition.pResource = texture;
-        barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-        barrier.Transition.StateBefore = beforeState;
-        barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_SOURCE;
-        ctx.ResourceBarrier(barrier);
-        resource.SetState(D3D12_RESOURCE_STATE_COPY_SOURCE);
+    const auto& plane = image.planes[0];
+    const UINT width = image.width;
+    const UINT height = image.height;
+    const UINT rowBytes = width * 4;
+    if (plane.rowPitch < rowBytes) {
+        throw std::runtime_error("ReadD3D12FrameToBgra: readback row pitch is too small");
     }
-
-    D3D12_TEXTURE_COPY_LOCATION dst{};
-    dst.pResource = readback.Get();
-    dst.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
-    dst.PlacedFootprint = footprint;
-
-    D3D12_TEXTURE_COPY_LOCATION src{};
-    src.pResource = texture;
-    src.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
-    src.SubresourceIndex = 0;
-
-    ctx.GetCommandList()->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
-
-    if (beforeState != D3D12_RESOURCE_STATE_COPY_SOURCE) {
-        D3D12_RESOURCE_BARRIER barrier{};
-        barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-        barrier.Transition.pResource = texture;
-        barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-        barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_SOURCE;
-        barrier.Transition.StateAfter = beforeState;
-        ctx.ResourceBarrier(barrier);
-        resource.SetState(beforeState);
+    const std::uint64_t required =
+        plane.offsetBytes + static_cast<std::uint64_t>(plane.rowPitch) * height;
+    if (required > image.pixels.size()) {
+        throw std::runtime_error("ReadD3D12FrameToBgra: readback buffer is too small");
     }
-
-    ctx.Close();
-    ID3D12CommandList* lists[] = { ctx.GetCommandList() };
-    core.DirectQueue().ExecuteCommandLists(1, lists);
-    const auto fenceValue = core.DirectQueue().Signal();
-    core.DirectQueue().WaitForFenceValue(fenceValue);
-
-    void* mapped = nullptr;
-    D3D12_RANGE readRange{ footprint.Offset, footprint.Offset + totalBytes };
-    ThrowIfFailed(readback->Map(0, &readRange, &mapped), "Map(readback)");
-
-    const auto width = static_cast<UINT>(desc.Width);
-    const auto height = desc.Height;
-    const auto srcStride = footprint.Footprint.RowPitch;
-    const auto srcBase = static_cast<const std::uint8_t*>(mapped) + footprint.Offset;
 
     BgraImage out;
     out.width = width;
     out.height = height;
-    out.stride = width * 4;
+    out.stride = rowBytes;
     out.pixels.resize(static_cast<std::size_t>(out.stride) * out.height);
 
-    const bool srcIsBgra = desc.Format == DXGI_FORMAT_B8G8R8A8_UNORM ||
-                           desc.Format == DXGI_FORMAT_B8G8R8A8_UNORM_SRGB;
+    const bool srcIsBgra = IsBgraPreviewFormat(image.format);
+    const auto* srcBase = image.pixels.data() + plane.offsetBytes;
     for (UINT y = 0; y < height; ++y) {
-        const auto* srcRow = srcBase + static_cast<std::size_t>(srcStride) * y;
+        const auto* srcRow = srcBase + static_cast<std::size_t>(plane.rowPitch) * y;
         auto* dstRow = out.pixels.data() + static_cast<std::size_t>(out.stride) * y;
         if (srcIsBgra) {
             std::memcpy(dstRow, srcRow, static_cast<std::size_t>(out.stride));
@@ -192,9 +118,6 @@ inline BgraImage ReadD3D12FrameToBgra(
             }
         }
     }
-
-    D3D12_RANGE writtenRange{ 0, 0 };
-    readback->Unmap(0, &writtenRange);
     return out;
 }
 
