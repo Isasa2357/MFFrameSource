@@ -27,7 +27,7 @@ MFCameraCaptureConfig ToUploadConfig(const MFVideoCaptureConfig& cfg) {
 }
 
 bool SameInputFormat(const MFCameraFormatInfo& a, const MFCameraFormatInfo& b) noexcept {
-    return GuidEquals(a.subtype, b.subtype) &&
+    return internal::GuidEquals(a.subtype, b.subtype) &&
            a.dxgiFormat == b.dxgiFormat &&
            a.width == b.width &&
            a.height == b.height;
@@ -35,7 +35,7 @@ bool SameInputFormat(const MFCameraFormatInfo& a, const MFCameraFormatInfo& b) n
 
 bool SampleMatchesFormat(const internal::MFCpuVideoSample& sample,
                          const MFCameraFormatInfo& format) noexcept {
-    return GuidEquals(sample.mfSubtype, format.subtype) &&
+    return internal::GuidEquals(sample.mfSubtype, format.subtype) &&
            sample.dxgiFormat == format.dxgiFormat &&
            sample.width == format.width &&
            sample.height == format.height;
