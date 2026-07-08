@@ -125,11 +125,27 @@ if(TARGET MFFrameSource::D3D11)
         ENVIRONMENT "MFFRAMESOURCE_D3D11_PROCESSING_SHADER_DIR=${MFFRAMESOURCE_D3D11_PROCESSING_SHADER_DIR}"
     )
 
+    mfframesource_add_test(test_d3d11_camera_thread_smoke MFFrameSource::D3D11
+        test_d3d11_camera_thread_smoke.cpp
+    )
+    set_tests_properties(test_d3d11_camera_thread_smoke PROPERTIES
+        LABELS "smoke;camera;d3d11;thread"
+        ENVIRONMENT "MFFRAMESOURCE_D3D11_PROCESSING_SHADER_DIR=${MFFRAMESOURCE_D3D11_PROCESSING_SHADER_DIR}"
+    )
+
     mfframesource_add_test(test_d3d11_video_capture_smoke MFFrameSource::D3D11
         test_d3d11_video_capture_smoke.cpp
     )
     set_tests_properties(test_d3d11_video_capture_smoke PROPERTIES
         LABELS "smoke;video;d3d11"
+        ENVIRONMENT "MFFRAMESOURCE_D3D11_PROCESSING_SHADER_DIR=${MFFRAMESOURCE_D3D11_PROCESSING_SHADER_DIR}"
+    )
+
+    mfframesource_add_test(test_d3d11_video_thread_smoke MFFrameSource::D3D11
+        test_d3d11_video_thread_smoke.cpp
+    )
+    set_tests_properties(test_d3d11_video_thread_smoke PROPERTIES
+        LABELS "smoke;video;d3d11;thread"
         ENVIRONMENT "MFFRAMESOURCE_D3D11_PROCESSING_SHADER_DIR=${MFFRAMESOURCE_D3D11_PROCESSING_SHADER_DIR}"
     )
 endif()
