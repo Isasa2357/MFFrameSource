@@ -22,11 +22,6 @@ namespace MFFrameSource {
 using MFD3D12VideoFrameQueue = ThreadKit::Queues::BlockingQueue<MFD3D12VideoFrame>;
 using MFD3D12VideoFrameQueuePtr = std::shared_ptr<MFD3D12VideoFrameQueue>;
 
-enum class MFVideoPlaybackMode {
-    RealTimeByTimestamp,
-    DecodeAsFastAsPossible,
-};
-
 struct MFD3D12VideoCaptureThreadConfig {
     std::wstring filePath;
     MFVideoCaptureConfig capture;
