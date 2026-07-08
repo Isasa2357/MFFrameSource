@@ -1,6 +1,6 @@
 #pragma once
 
-#include <MFFrameSource/MFD3D12VideoCapture.hpp>
+#include <MFFrameSource/MFCommon.hpp>
 #include "MFCpuSampleReader.hpp"
 
 #include <chrono>
