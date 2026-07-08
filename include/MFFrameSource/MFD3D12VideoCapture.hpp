@@ -14,37 +14,6 @@ namespace MFFrameSource {
 
 using MFD3D12VideoFrame = MFD3D12CameraFrame;
 
-struct MFVideoCaptureConfig {
-    // Exact decoded-output request.  The Source Reader may decode compressed
-    // streams, but the resulting CPU sample must exactly match this request.
-    // No best-match fallback is performed.
-    MFCameraFormatRequest input;
-
-    // 0 means input.width / input.height.
-    UINT outputWidth = 0;
-    UINT outputHeight = 0;
-    DXGI_FORMAT outputFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
-
-    std::wstring processingShaderDirectory;
-
-    std::size_t framePoolSize = 4;
-    bool waitForGpuCompletionOnRead = false;
-    std::uint64_t uploadRingSizeBytes = 0;
-
-    UINT transientCbvSrvUavDescriptorCount = 256;
-    UINT transientSamplerDescriptorCount = 16;
-    UINT persistentSrvDescriptorCount = 64;
-
-    // File playback controls.
-    bool loop = false;
-    std::int64_t startPosition100ns = 0;
-
-    // Keep CPU native output path.  Converters/decoders are enabled by default
-    // so compressed files can be decoded into the exact requested subtype.
-    bool disableConverters = false;
-    bool enableHardwareTransforms = false;
-};
-
 struct MFD3D12VideoReadResult {
     MFFrameStatus status = MFFrameStatus::Error;
     MFD3D12VideoFrame frame;
