@@ -100,27 +100,60 @@ struct MFCameraCaptureConfig {
     UINT outputHeight = 0;
     DXGI_FORMAT outputFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
 
-    // D3D12Processing shader directory。空なら D3D12Helper 側の既定探索に任せる。
+    // D3D11/D3D12 Processing shader directory。空なら Helper 側の既定探索に任せる。
     std::wstring processingShaderDirectory;
 
     // CameraCapture::read 用の最小 frame pool。利用者が frame を保持したまま
-    // 複数回 read しても破壊しない。GPU 完了は frame の ready fence で管理する。
+    // 複数回 read しても破壊しない。
     std::size_t framePoolSize = 4;
 
     // true の場合、read()/clone() は GPU 完了まで CPU wait してから返す。
-    // false の場合、frame は ready fence/value を持った非同期 frame として返る。
+    // false の場合、backend ごとの標準同期モデルに従う。
     bool waitForGpuCompletionOnRead = false;
 
-    // UploadRing size。0 の場合は input texture の必要 upload size と framePoolSize から自動計算する。
+    // D3D12 UploadRing size。D3D11 backend では無視される。
+    // 0 の場合は input texture の必要 upload size と framePoolSize から自動計算する。
     std::uint64_t uploadRingSizeBytes = 0;
 
     // Descriptor allocator capacity。D3D12Processing は dispatch ごとに transient descriptor を使う。
+    // D3D11 backend では保持するが通常は無視される。
     UINT transientCbvSrvUavDescriptorCount = 256;
     UINT transientSamplerDescriptorCount = 16;
     UINT persistentSrvDescriptorCount = 64;
 };
 
-// Supported initial CPU sample formats for D3D12-first path.
+struct MFVideoCaptureConfig {
+    // Exact decoded-output request.  The Source Reader may decode compressed
+    // streams, but the resulting CPU sample must exactly match this request.
+    // No best-match fallback is performed.
+    MFCameraFormatRequest input;
+
+    // 0 means input.width / input.height.
+    UINT outputWidth = 0;
+    UINT outputHeight = 0;
+    DXGI_FORMAT outputFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
+
+    std::wstring processingShaderDirectory;
+
+    std::size_t framePoolSize = 4;
+    bool waitForGpuCompletionOnRead = false;
+    std::uint64_t uploadRingSizeBytes = 0;
+
+    UINT transientCbvSrvUavDescriptorCount = 256;
+    UINT transientSamplerDescriptorCount = 16;
+    UINT persistentSrvDescriptorCount = 64;
+
+    // File playback controls.
+    bool loop = false;
+    std::int64_t startPosition100ns = 0;
+
+    // Keep CPU native output path.  Converters/decoders are enabled by default
+    // so compressed files can be decoded into the exact requested subtype.
+    bool disableConverters = false;
+    bool enableHardwareTransforms = false;
+};
+
+// Supported initial CPU sample formats for D3D11/D3D12 first path.
 DXGI_FORMAT MfSubtypeToDxgiFormat(const GUID& subtype) noexcept;
 const wchar_t* DxgiFormatName(DXGI_FORMAT format) noexcept;
 bool IsSupportedCpuUploadInputFormat(DXGI_FORMAT format) noexcept;
