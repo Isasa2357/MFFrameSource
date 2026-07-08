@@ -4,10 +4,12 @@
 
 #include <D3D11Helper/D3D11Core/D3D11Core.hpp>
 
+#include <chrono>
 #include <cstdlib>
 #include <iostream>
 #include <memory>
 #include <string>
+#include <thread>
 
 using namespace MFFrameSource;
 
@@ -61,6 +63,17 @@ GUID ParseSubtype(const std::wstring& value) {
     throw std::runtime_error("camera subtype must be NV12, P010, RGB32, or ARGB32");
 }
 
+MFD3D11CameraReadResult ReadWithWarmupRetry(MFD3D11CameraCapture& capture) {
+    MFD3D11CameraReadResult result;
+    for (int attempt = 0; attempt < 120; ++attempt) {
+        result = capture.read();
+        if (result.ok()) return result;
+        if (result.status != MFFrameStatus::NoSample) return result;
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    return result;
+}
+
 } // namespace
 
 MFTEST_MAIN({
@@ -97,10 +110,13 @@ MFTEST_MAIN({
     }
     MFTEST_CHECK(capture.isOpened());
 
-    auto result = capture.read();
+    auto result = ReadWithWarmupRetry(capture);
     if (!result.ok()) {
         std::wcerr << L"read failed status=" << static_cast<int>(result.status)
                    << L" " << result.error.where << L": " << result.error.message << L"\n";
+        if (result.status == MFFrameStatus::NoSample) {
+            std::wcerr << L"NoSample persisted after warmup retries. The camera may not be delivering samples for the selected format.\n";
+        }
         MFTEST_CHECK(false);
     }
 
