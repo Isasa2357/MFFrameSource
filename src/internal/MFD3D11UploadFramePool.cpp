@@ -1,9 +1,11 @@
 #include "MFD3D11UploadFramePool.hpp"
 
+#include <algorithm>
 #include <cstring>
 #include <filesystem>
 #include <limits>
 #include <stdexcept>
+#include <string>
 
 namespace MFFrameSource {
 
