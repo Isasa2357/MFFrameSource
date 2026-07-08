@@ -93,11 +93,20 @@ MFCameraFormatInfo ReadCurrentVideoFormat(IMFSourceReader* reader, const wchar_t
     return info;
 }
 
+bool IsPaddedDimension(UINT requested, UINT actual) noexcept {
+    if (actual == requested) return true;
+    if (actual < requested) return false;
+    // Some decoders expose the visible size at SetCurrentMediaType() time and then
+    // report an internally padded coded size after the first read. Keep this small
+    // and conservative so true layout changes still surface as FormatChanged.
+    return (actual - requested) <= 32;
+}
+
 bool IsCompatibleDecodedFormatAfterChange(const MFCameraFormatInfo& before,
                                           const MFCameraFormatInfo& after) noexcept {
     return GuidEquals(before.subtype, after.subtype) &&
-           before.width == after.width &&
-           before.height == after.height &&
+           IsPaddedDimension(before.width, after.width) &&
+           IsPaddedDimension(before.height, after.height) &&
            IsSupportedCpuUploadInputFormat(after.dxgiFormat);
 }
 
@@ -233,8 +242,9 @@ MFCpuSampleReadResult MFVideoFileSampleReader::read() {
                     return result;
                 }
 
-                // Some decoders adjust non-layout metadata such as frame rate after the first read.
-                // Width / height / subtype remain compatible with the upload path, so continue.
+                // Some decoders adjust non-layout metadata such as frame rate after the first read,
+                // or expose a padded coded height. The upload path can handle the updated format;
+                // video backends reinitialize their frame pool if the sample layout changed.
                 selectedFormat_ = changed;
                 if (!sample) {
                     continue;
