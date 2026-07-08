@@ -290,6 +290,21 @@ if(MFFRAMESOURCE_INSTALL)
     endif()
 endif()
 
+if(MFFRAMESOURCE_BUILD_SAMPLE AND MFFRAMESOURCE_BUILD_D3D11)
+    foreach(sample_name IN ITEMS
+        d3d11_camera_read
+        d3d11_camera_thread_read
+        d3d11_stereo_sync
+        d3d11_video_read
+        d3d11_video_thread_read)
+        add_executable(${sample_name} sample/${sample_name}.cpp)
+        target_link_libraries(${sample_name} PRIVATE MFFrameSource::D3D11)
+        if(MSVC)
+            target_compile_options(${sample_name} PRIVATE /utf-8 /EHsc /W4 /permissive-)
+        endif()
+    endforeach()
+endif()
+
 if(MFFRAMESOURCE_BUILD_SAMPLE AND MFFRAMESOURCE_BUILD_D3D12)
     foreach(sample_name IN ITEMS
         d3d12_camera_read
@@ -301,6 +316,9 @@ if(MFFRAMESOURCE_BUILD_SAMPLE AND MFFRAMESOURCE_BUILD_D3D12)
         d3d12_video_benchmark)
         add_executable(${sample_name} sample/${sample_name}.cpp)
         target_link_libraries(${sample_name} PRIVATE MFFrameSource::D3D12)
+        if(MSVC)
+            target_compile_options(${sample_name} PRIVATE /utf-8 /EHsc /W4 /permissive-)
+        endif()
         mfframesource_copy_dxc_runtime(${sample_name})
     endforeach()
 endif()
