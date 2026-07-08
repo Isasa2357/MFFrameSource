@@ -1,7 +1,7 @@
 #include "MFD3D12FrameCloner.hpp"
 #include "MFD3D12UploadFramePool.hpp"
 
-#include <D3D12Helper/D3D12Core/D3D12Barrier.hpp>
+#include <D3D12Helper/D3D12Gpu/D3D12Copy.hpp>
 
 #include <algorithm>
 #include <stdexcept>
@@ -113,44 +113,14 @@ MFD3D12CameraFrame MFD3D12FrameCloner::clone(MFD3D12CameraFrame& source) {
     ctx.Reset();
 
     const auto srcBefore = srcResource.GetState();
-    const auto dstBefore = dstResource.GetState();
-
-    D3D12_RESOURCE_BARRIER barriers[2] = {};
-    UINT barrierCount = 0;
-    if (srcBefore != D3D12_RESOURCE_STATE_COPY_SOURCE) {
-        barriers[barrierCount++] = MakeTransitionBarrier(srcResource.Get(), srcBefore,
-                                                         D3D12_RESOURCE_STATE_COPY_SOURCE);
-    }
-    if (dstBefore != D3D12_RESOURCE_STATE_COPY_DEST) {
-        barriers[barrierCount++] = MakeTransitionBarrier(dstResource.Get(), dstBefore,
-                                                         D3D12_RESOURCE_STATE_COPY_DEST);
-    }
-    if (barrierCount) ctx.ResourceBarrier(barrierCount, barriers);
-
-    D3D12_TEXTURE_COPY_LOCATION srcLoc = {};
-    srcLoc.pResource = srcResource.Get();
-    srcLoc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
-    srcLoc.SubresourceIndex = 0;
-
-    D3D12_TEXTURE_COPY_LOCATION dstLoc = {};
-    dstLoc.pResource = dstResource.Get();
-    dstLoc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
-    dstLoc.SubresourceIndex = 0;
-
-    ctx.GetCommandList()->CopyTextureRegion(&dstLoc, 0, 0, 0, &srcLoc, nullptr);
-
-    D3D12_RESOURCE_BARRIER after[2] = {};
-    UINT afterCount = 0;
-    after[afterCount++] = MakeTransitionBarrier(dstResource.Get(), D3D12_RESOURCE_STATE_COPY_DEST,
-                                                D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-    if (srcBefore != D3D12_RESOURCE_STATE_COPY_SOURCE) {
-        after[afterCount++] = MakeTransitionBarrier(srcResource.Get(), D3D12_RESOURCE_STATE_COPY_SOURCE,
-                                                    srcBefore);
-    }
-    ctx.ResourceBarrier(afterCount, after);
-
-    dstResource.SetState(D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-    srcResource.SetState(srcBefore);
+    RecordCopyTextureSubresource(
+        ctx,
+        dstResource,
+        0,
+        srcResource,
+        0,
+        D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+        srcBefore);
 
     ctx.Close();
     ID3D12CommandList* lists[] = { ctx.GetCommandList() };
