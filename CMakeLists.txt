@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(MFFrameSourceD3D12 VERSION 0.4.0 LANGUAGES CXX)
+project(MFFrameSourceD3D12 VERSION 1.0.1 LANGUAGES CXX)
 
 option(MFFRAMESOURCE_BUILD_SAMPLE "Build MFFrameSource samples" ON)
 option(MFFRAMESOURCE_BUILD_TESTS "Build MFFrameSource tests" ON)
@@ -10,7 +10,9 @@ option(MFFRAMESOURCE_FETCH_THREADKIT "Fetch ThreadKit with FetchContent when the
 set(D3D12HELPER_ROOT "" CACHE PATH "Optional local D3D12Helper repository root. Usually leave empty; FetchContent is used by default.")
 set(THREADKIT_ROOT "" CACHE PATH "Optional local ThreadKit repository root. Usually leave empty; FetchContent is used by default.")
 set(MFFRAMESOURCE_D3D12HELPER_GIT_REPOSITORY "https://github.com/Isasa2357/D3D12Helper.git" CACHE STRING "D3D12Helper Git repository")
-set(MFFRAMESOURCE_D3D12HELPER_GIT_TAG "main" CACHE STRING "D3D12Helper Git ref/tag/commit to fetch")
+# Pin to the newest confirmed D3D12Helper release tag at the time this branch was created.
+# Do not leave this on main; D3D12Helper may continue to change independently.
+set(MFFRAMESOURCE_D3D12HELPER_GIT_TAG "v1.11.0" CACHE STRING "D3D12Helper Git ref/tag/commit to fetch")
 set(MFFRAMESOURCE_THREADKIT_GIT_REPOSITORY "https://github.com/Isasa2357/ThreadKit.git" CACHE STRING "ThreadKit Git repository")
 set(MFFRAMESOURCE_THREADKIT_GIT_TAG "main" CACHE STRING "ThreadKit Git ref/tag/commit to fetch")
 
@@ -36,6 +38,7 @@ if(NOT TARGET D3D12Helper::D3D12Helper)
         add_subdirectory("${D3D12HELPER_ROOT}" "${CMAKE_BINARY_DIR}/_deps/D3D12Helper-build")
         set(MFFRAMESOURCE_D3D12HELPER_SOURCE_DIR "${D3D12HELPER_ROOT}")
     elseif(MFFRAMESOURCE_FETCH_D3D12HELPER)
+        message(STATUS "Fetching D3D12Helper ${MFFRAMESOURCE_D3D12HELPER_GIT_TAG}")
         set(D3D12HELPER_BUILD_SAMPLES OFF CACHE BOOL "" FORCE)
         set(D3D12HELPER_BUILD_TESTS OFF CACHE BOOL "" FORCE)
         set(D3D12HELPER_ENABLE_WARNINGS OFF CACHE BOOL "" FORCE)
