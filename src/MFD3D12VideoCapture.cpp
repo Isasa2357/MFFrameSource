@@ -26,6 +26,21 @@ MFCameraCaptureConfig ToUploadConfig(const MFVideoCaptureConfig& cfg) {
     return out;
 }
 
+bool SameInputFormat(const MFCameraFormatInfo& a, const MFCameraFormatInfo& b) noexcept {
+    return GuidEquals(a.subtype, b.subtype) &&
+           a.dxgiFormat == b.dxgiFormat &&
+           a.width == b.width &&
+           a.height == b.height;
+}
+
+bool SampleMatchesFormat(const internal::MFCpuVideoSample& sample,
+                         const MFCameraFormatInfo& format) noexcept {
+    return GuidEquals(sample.mfSubtype, format.subtype) &&
+           sample.dxgiFormat == format.dxgiFormat &&
+           sample.width == format.width &&
+           sample.height == format.height;
+}
+
 } // namespace
 
 struct MFD3D12VideoCapture::Impl {
@@ -110,6 +125,18 @@ MFD3D12VideoReadResult MFD3D12VideoCapture::read() {
     }
 
     try {
+        const MFCameraFormatInfo readerFormat = impl_->reader.selectedFormat();
+        if (!SameInputFormat(selectedFormat_, readerFormat) ||
+            !SampleMatchesFormat(cpu.sample, selectedFormat_)) {
+            // Video decoders may update the CPU sample layout after the first read
+            // (for example, visible 1404px height -> coded 1408px height). Rebuild
+            // the upload pool to match the actual sample layout while preserving the
+            // requested output size from config.
+            selectedFormat_ = readerFormat;
+            impl_->framePool.close();
+            impl_->framePool.initialize(impl_->core, ToUploadConfig(impl_->config), selectedFormat_);
+        }
+
         result.frame = impl_->framePool.process(cpu.sample);
         cpu.sample.unlock();
         result.status = MFFrameStatus::Ok;
