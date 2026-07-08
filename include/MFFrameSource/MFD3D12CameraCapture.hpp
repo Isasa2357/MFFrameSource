@@ -3,8 +3,7 @@
 #include "MFCommon.hpp"
 
 #include <D3D12Helper/D3D12Core/D3D12Core.hpp>
-#include <D3D12Helper/D3D12Framework/D3D12DescriptorHandle.hpp>
-#include <D3D12Helper/D3D12Framework/D3D12Resource.hpp>
+#include <D3D12Helper/D3D12Gpu/D3D12Gpu.hpp>
 
 #include <chrono>
 #include <memory>
