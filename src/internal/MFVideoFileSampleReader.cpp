@@ -127,7 +127,7 @@ void MFVideoFileSampleReader::configureExactDecodedFormat(const MFCameraFormatRe
            << static_cast<unsigned long>(hr)
            << L". The file may not be decodable to the requested CPU format without a converter/decoder.";
         const auto msgw = ss.str();
-        throw std::runtime_error(std::string(msgw.begin(), msgw.end()));
+        throw std::runtime_error(WideToUtf8(msgw));
     }
 
     ComPtr<IMFMediaType> actual;
@@ -149,7 +149,7 @@ void MFVideoFileSampleReader::configureExactDecodedFormat(const MFCameraFormatRe
            << L" fps=" << fps.numerator << L"/" << fps.denominator
            << L" subtypeDxgi=" << DxgiFormatName(dxgi);
         const auto msgw = ss.str();
-        throw std::runtime_error(std::string(msgw.begin(), msgw.end()));
+        throw std::runtime_error(WideToUtf8(msgw));
     }
 
     if (!IsSupportedCpuUploadInputFormat(dxgi)) {
@@ -218,7 +218,6 @@ MFCpuSampleReadResult MFVideoFileSampleReader::read() {
 bool MFVideoFileSampleReader::seek(std::int64_t position100ns) {
     if (!reader_) return false;
     if (position100ns < 0) position100ns = 0;
-
     PROPVARIANT var;
     PropVariantInit(&var);
     var.vt = VT_I8;
@@ -229,6 +228,7 @@ bool MFVideoFileSampleReader::seek(std::int64_t position100ns) {
 }
 
 MFCpuVideoSample MFVideoFileSampleReader::lockSample(IMFSample* sample, LONGLONG sampleTime, LONGLONG sampleDuration) {
+    // Same layout handling as camera samples.
     MFCpuVideoSample out;
     out.sample_ = sample;
     out.dxgiFormat = selectedFormat_.dxgiFormat;
@@ -241,89 +241,86 @@ MFCpuVideoSample MFVideoFileSampleReader::lockSample(IMFSample* sample, LONGLONG
 
     DWORD bufferCount = 0;
     ThrowIfFailed(sample->GetBufferCount(&bufferCount), L"IMFSample::GetBufferCount(video)");
-    if (bufferCount == 0) {
-        throw std::runtime_error("video sample has no media buffer");
-    }
+    if (bufferCount == 0) throw std::runtime_error("video sample has no media buffer");
+
     if (bufferCount == 1) {
-        ThrowIfFailed(sample->GetBufferByIndex(0, &out.buffer_), L"IMFSample::GetBufferByIndex(video)");
-    } else {
         ThrowIfFailed(sample->ConvertToContiguousBuffer(&out.buffer_), L"IMFSample::ConvertToContiguousBuffer(video)");
-    }
-
-    if (SUCCEEDED(out.buffer_.As(&out.buffer2d_)) && out.buffer2d_) {
-        ThrowIfFailed(out.buffer2d_->Lock2D(&out.lockPtr_, &out.lockPitch_), L"IMF2DBuffer::Lock2D(video)");
-        out.locked2d_ = true;
-
-        const UINT64 row0 = RowBytes(out.dxgiFormat, out.width);
-        if (row0 == 0) throw std::runtime_error("unsupported DXGI format in video Lock2D");
-
-        if (out.dxgiFormat == DXGI_FORMAT_NV12 || out.dxgiFormat == DXGI_FORMAT_P010) {
-            if (out.lockPitch_ <= 0) {
-                throw std::runtime_error("negative pitch planar video IMF2DBuffer is unsupported");
-            }
-            if (static_cast<UINT64>(out.lockPitch_) < row0) {
-                throw std::runtime_error("planar video IMF2DBuffer pitch is smaller than row bytes");
-            }
-            out.planeCount = 2;
-            out.planes[0].data = out.lockPtr_;
-            out.planes[0].rowPitch = static_cast<UINT64>(out.lockPitch_);
-            out.planes[0].slicePitch = static_cast<UINT64>(out.lockPitch_) * out.height;
-            out.planes[1].data = out.lockPtr_ + static_cast<size_t>(out.lockPitch_) * out.height;
-            out.planes[1].rowPitch = static_cast<UINT64>(out.lockPitch_);
-            out.planes[1].slicePitch = static_cast<UINT64>(out.lockPitch_) * (out.height / 2);
+        if (SUCCEEDED(out.buffer_.As(&out.buffer2d_))) {
+            BYTE* scan0 = nullptr;
+            LONG pitch = 0;
+            ThrowIfFailed(out.buffer2d_->Lock2D(&scan0, &pitch), L"IMF2DBuffer::Lock2D(video)");
+            out.locked2d_ = true;
+            out.lockPtr_ = scan0;
+            out.lockPitch_ = pitch;
         } else {
-            const UINT rows = out.height;
-            if (out.lockPitch_ > 0 && static_cast<UINT64>(out.lockPitch_) >= row0) {
-                out.planeCount = 1;
-                out.planes[0].data = out.lockPtr_;
-                out.planes[0].rowPitch = static_cast<UINT64>(out.lockPitch_);
-                out.planes[0].slicePitch = static_cast<UINT64>(out.lockPitch_) * rows;
-            } else {
-                CopyPitchedRows(out.owned_, out.lockPtr_, out.lockPitch_, row0, rows);
-                out.unlock();
-                out.planeCount = 1;
-                out.planes[0].data = out.owned_.data();
-                out.planes[0].rowPitch = row0;
-                out.planes[0].slicePitch = row0 * rows;
-            }
+            BYTE* data = nullptr;
+            DWORD maxLen = 0, curLen = 0;
+            ThrowIfFailed(out.buffer_->Lock(&data, &maxLen, &curLen), L"IMFMediaBuffer::Lock(video)");
+            out.lockedMediaBuffer_ = true;
+            out.lockPtr_ = data;
+            out.lockPitch_ = static_cast<LONG>(RowBytes(out.dxgiFormat, out.width));
+            out.lockMaxLen_ = maxLen;
+            out.lockCurLen_ = curLen;
         }
-    } else {
-        BYTE* ptr = nullptr;
-        DWORD maxLen = 0, curLen = 0;
-        ThrowIfFailed(out.buffer_->Lock(&ptr, &maxLen, &curLen), L"IMFMediaBuffer::Lock(video)");
-        out.lockPtr_ = ptr;
-        out.lockMaxLen_ = maxLen;
-        out.lockCurLen_ = curLen;
-        out.lockedMediaBuffer_ = true;
+        const UINT64 rowBytes = RowBytes(out.dxgiFormat, out.width);
+        out.planes[0] = { out.lockPtr_, rowBytes, out.lockPitch_, out.height };
+        out.planeCount = 1;
+        if (out.dxgiFormat == DXGI_FORMAT_NV12 || out.dxgiFormat == DXGI_FORMAT_P010) {
+            out.planes[1] = {
+                out.lockPtr_ + static_cast<std::ptrdiff_t>(out.lockPitch_) * out.height,
+                rowBytes,
+                out.lockPitch_,
+                out.height / 2
+            };
+            out.planeCount = 2;
+        }
+        out.valid_ = true;
+        return out;
+    }
 
-        const UINT64 expected = ExpectedTightImageBytes(out.dxgiFormat, out.width, out.height);
-        if (expected == 0 || curLen < expected) {
-            throw std::runtime_error("video non-2D media buffer is smaller than expected tight image size");
-        }
-        if (curLen != expected) {
-            throw std::runtime_error("video non-2D media buffer has non-tight stride; IMF2DBuffer is required");
-        }
-
-        const UINT64 row0 = RowBytes(out.dxgiFormat, out.width);
-        out.planeCount = DxgiPlaneCount(out.dxgiFormat);
-        out.planes[0].data = ptr;
-        out.planes[0].rowPitch = row0;
-        out.planes[0].slicePitch = row0 * out.height;
-        if (out.planeCount == 2) {
-            out.planes[1].data = ptr + out.planes[0].slicePitch;
-            out.planes[1].rowPitch = row0;
-            out.planes[1].slicePitch = row0 * (out.height / 2);
+    out.owned_.clear();
+    out.owned_.reserve(static_cast<size_t>(RowBytes(out.dxgiFormat, out.width)) * out.height * 3 / 2);
+    for (DWORD b = 0; b < bufferCount; ++b) {
+        ComPtr<IMFMediaBuffer> mb;
+        ThrowIfFailed(sample->GetBufferByIndex(b, &mb), L"IMFSample::GetBufferByIndex(video)");
+        ComPtr<IMF2DBuffer> b2d;
+        if (SUCCEEDED(mb.As(&b2d))) {
+            BYTE* scan0 = nullptr;
+            LONG pitch = 0;
+            ThrowIfFailed(b2d->Lock2D(&scan0, &pitch), L"IMF2DBuffer::Lock2D(video split)");
+            const UINT rows = (b == 0) ? out.height : out.height / 2;
+            CopyPitchedRows(out.owned_, scan0, pitch, RowBytes(out.dxgiFormat, out.width), rows);
+            b2d->Unlock2D();
+        } else {
+            BYTE* data = nullptr;
+            DWORD maxLen = 0, curLen = 0;
+            ThrowIfFailed(mb->Lock(&data, &maxLen, &curLen), L"IMFMediaBuffer::Lock(video split)");
+            out.owned_.insert(out.owned_.end(), data, data + curLen);
+            mb->Unlock();
         }
     }
 
+    out.lockPtr_ = out.owned_.data();
+    out.lockPitch_ = static_cast<LONG>(RowBytes(out.dxgiFormat, out.width));
+    out.planes[0] = { out.lockPtr_, RowBytes(out.dxgiFormat, out.width), out.lockPitch_, out.height };
+    out.planeCount = 1;
+    if (out.dxgiFormat == DXGI_FORMAT_NV12 || out.dxgiFormat == DXGI_FORMAT_P010) {
+        out.planes[1] = {
+            out.lockPtr_ + static_cast<size_t>(out.lockPitch_) * out.height,
+            RowBytes(out.dxgiFormat, out.width),
+            out.lockPitch_,
+            out.height / 2
+        };
+        out.planeCount = 2;
+    }
     out.valid_ = true;
     return out;
 }
 
 void MFVideoFileSampleReader::close() noexcept {
-    if (reader_) reader_.Reset();
-    selectedFormat_ = {};
+    reader_.Reset();
     filePath_.clear();
+    selectedFormat_ = {};
     duration100ns_ = -1;
 }
 
