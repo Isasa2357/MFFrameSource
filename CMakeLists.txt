@@ -6,6 +6,7 @@ option(MFFRAMESOURCE_BUILD_SAMPLE "Build MFFrameSource samples" ON)
 option(MFFRAMESOURCE_BUILD_TESTS "Build MFFrameSource tests" ON)
 option(MFFRAMESOURCE_BUILD_D3D11 "Build MFFrameSource D3D11 backend" ON)
 option(MFFRAMESOURCE_BUILD_D3D12 "Build MFFrameSource D3D12 backend" ON)
+option(MFFRAMESOURCE_INSTALL "Enable MFFrameSource install and CMake package export rules" OFF)
 
 option(MFFRAMESOURCE_FETCH_D3D11HELPER "Fetch D3D11Helper with FetchContent when the target is not already available" ON)
 option(MFFRAMESOURCE_FETCH_D3D12HELPER "Fetch D3D12Helper with FetchContent when the target is not already available" ON)
@@ -231,60 +232,62 @@ endif()
 # -----------------------------------------------------------------------------
 # Install / package support
 # -----------------------------------------------------------------------------
-if(MFFRAMESOURCE_INSTALL_TARGETS)
-    install(TARGETS ${MFFRAMESOURCE_INSTALL_TARGETS}
-        EXPORT MFFrameSourceTargets
-        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
-        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-        INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+if(MFFRAMESOURCE_INSTALL)
+    if(MFFRAMESOURCE_INSTALL_TARGETS)
+        install(TARGETS ${MFFRAMESOURCE_INSTALL_TARGETS}
+            EXPORT MFFrameSourceTargets
+            ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+            LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+            RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+            INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+        )
+    endif()
+
+    install(DIRECTORY include/
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
     )
-endif()
 
-install(DIRECTORY include/
-    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
-)
+    if(MFFRAMESOURCE_BUILD_D3D11 AND EXISTS "${MFFRAMESOURCE_D3D11_PROCESSING_SHADER_DIR}")
+        install(DIRECTORY "${MFFRAMESOURCE_D3D11_PROCESSING_SHADER_DIR}/"
+            DESTINATION "${CMAKE_INSTALL_DATADIR}/MFFrameSource/shaders/D3D11Processing"
+        )
+    endif()
+    if(MFFRAMESOURCE_BUILD_D3D12 AND EXISTS "${MFFRAMESOURCE_D3D12_PROCESSING_SHADER_DIR}")
+        install(DIRECTORY "${MFFRAMESOURCE_D3D12_PROCESSING_SHADER_DIR}/"
+            DESTINATION "${CMAKE_INSTALL_DATADIR}/MFFrameSource/shaders/D3D12Processing"
+        )
+    endif()
 
-if(MFFRAMESOURCE_BUILD_D3D11 AND EXISTS "${MFFRAMESOURCE_D3D11_PROCESSING_SHADER_DIR}")
-    install(DIRECTORY "${MFFRAMESOURCE_D3D11_PROCESSING_SHADER_DIR}/"
-        DESTINATION "${CMAKE_INSTALL_DATADIR}/MFFrameSource/shaders/D3D11Processing"
+    install(EXPORT MFFrameSourceTargets
+        NAMESPACE MFFrameSource::
+        FILE MFFrameSourceTargets.cmake
+        DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/MFFrameSource"
     )
-endif()
-if(MFFRAMESOURCE_BUILD_D3D12 AND EXISTS "${MFFRAMESOURCE_D3D12_PROCESSING_SHADER_DIR}")
-    install(DIRECTORY "${MFFRAMESOURCE_D3D12_PROCESSING_SHADER_DIR}/"
-        DESTINATION "${CMAKE_INSTALL_DATADIR}/MFFrameSource/shaders/D3D12Processing"
+
+    configure_package_config_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/MFFrameSourceConfig.cmake.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/MFFrameSourceConfig.cmake"
+        INSTALL_DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/MFFrameSource"
     )
-endif()
 
-install(EXPORT MFFrameSourceTargets
-    NAMESPACE MFFrameSource::
-    FILE MFFrameSourceTargets.cmake
-    DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/MFFrameSource"
-)
+    write_basic_package_version_file(
+        "${CMAKE_CURRENT_BINARY_DIR}/MFFrameSourceConfigVersion.cmake"
+        VERSION ${PROJECT_VERSION}
+        COMPATIBILITY SameMajorVersion
+    )
 
-configure_package_config_file(
-    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/MFFrameSourceConfig.cmake.in"
-    "${CMAKE_CURRENT_BINARY_DIR}/MFFrameSourceConfig.cmake"
-    INSTALL_DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/MFFrameSource"
-)
+    install(FILES
+        "${CMAKE_CURRENT_BINARY_DIR}/MFFrameSourceConfig.cmake"
+        "${CMAKE_CURRENT_BINARY_DIR}/MFFrameSourceConfigVersion.cmake"
+        DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/MFFrameSource"
+    )
 
-write_basic_package_version_file(
-    "${CMAKE_CURRENT_BINARY_DIR}/MFFrameSourceConfigVersion.cmake"
-    VERSION ${PROJECT_VERSION}
-    COMPATIBILITY SameMajorVersion
-)
-
-install(FILES
-    "${CMAKE_CURRENT_BINARY_DIR}/MFFrameSourceConfig.cmake"
-    "${CMAKE_CURRENT_BINARY_DIR}/MFFrameSourceConfigVersion.cmake"
-    DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/MFFrameSource"
-)
-
-if(D3D12HELPER_DXCOMPILER_DLL AND EXISTS "${D3D12HELPER_DXCOMPILER_DLL}")
-    install(FILES "${D3D12HELPER_DXCOMPILER_DLL}" DESTINATION ${CMAKE_INSTALL_BINDIR})
-endif()
-if(D3D12HELPER_DXIL_DLL AND EXISTS "${D3D12HELPER_DXIL_DLL}")
-    install(FILES "${D3D12HELPER_DXIL_DLL}" DESTINATION ${CMAKE_INSTALL_BINDIR})
+    if(D3D12HELPER_DXCOMPILER_DLL AND EXISTS "${D3D12HELPER_DXCOMPILER_DLL}")
+        install(FILES "${D3D12HELPER_DXCOMPILER_DLL}" DESTINATION ${CMAKE_INSTALL_BINDIR})
+    endif()
+    if(D3D12HELPER_DXIL_DLL AND EXISTS "${D3D12HELPER_DXIL_DLL}")
+        install(FILES "${D3D12HELPER_DXIL_DLL}" DESTINATION ${CMAKE_INSTALL_BINDIR})
+    endif()
 endif()
 
 if(MFFRAMESOURCE_BUILD_SAMPLE AND MFFRAMESOURCE_BUILD_D3D12)
