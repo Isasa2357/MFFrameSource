@@ -34,6 +34,11 @@ enum class MFFrameStatus {
     Error,
 };
 
+enum class MFVideoPlaybackMode {
+    RealTimeByTimestamp,
+    DecodeAsFastAsPossible,
+};
+
 struct MFErrorInfo {
     HRESULT hr = S_OK;
     std::wstring where;
