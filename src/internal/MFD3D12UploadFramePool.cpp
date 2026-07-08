@@ -2,7 +2,10 @@
 
 #include "MFComUtil.hpp"
 
+#include <D3D12Helper/D3D12Core/D3D12Barrier.hpp>
+
 #include <algorithm>
+#include <filesystem>
 #include <sstream>
 #include <stdexcept>
 
