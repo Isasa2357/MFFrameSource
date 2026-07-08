@@ -5,14 +5,13 @@
 
 #include <MFFrameSource/MFD3D12CameraCapture.hpp>
 
-#include <D3D12Helper/D3D12Core/D3D12Barrier.hpp>
 #include <D3D12Helper/D3D12Core/D3D12Core.hpp>
-#include <D3D12Helper/D3D12Framework/D3D12DescriptorAllocator.hpp>
-#include <D3D12Helper/D3D12Framework/D3D12Helpers.hpp>
-#include <D3D12Helper/D3D12Framework/D3D12UploadRing.hpp>
+#include <D3D12Helper/D3D12Gpu/D3D12Gpu.hpp>
 #include <D3D12Helper/D3D12Processing/D3D12Processing.hpp>
 
+#include <chrono>
 #include <condition_variable>
+#include <cstdint>
 #include <memory>
 #include <mutex>
 #include <vector>
