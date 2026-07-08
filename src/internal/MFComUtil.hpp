@@ -5,6 +5,7 @@
 #include <comdef.h>
 #include <sstream>
 #include <stdexcept>
+#include <string>
 
 namespace MFFrameSource::internal {
 
@@ -60,6 +61,15 @@ inline std::wstring Utf8ToWide(const std::string& s) {
     std::wstring w(static_cast<size_t>(len), L'\0');
     MultiByteToWideChar(CP_UTF8, 0, s.data(), static_cast<int>(s.size()), w.data(), len);
     return w;
+}
+
+inline std::string WideToUtf8(const std::wstring& w) {
+    if (w.empty()) return {};
+    const int len = WideCharToMultiByte(CP_UTF8, 0, w.data(), static_cast<int>(w.size()), nullptr, 0, nullptr, nullptr);
+    if (len <= 0) return "<wide conversion failed>";
+    std::string s(static_cast<size_t>(len), '\0');
+    WideCharToMultiByte(CP_UTF8, 0, w.data(), static_cast<int>(w.size()), s.data(), len, nullptr, nullptr);
+    return s;
 }
 
 inline bool GuidEquals(const GUID& a, const GUID& b) noexcept {
