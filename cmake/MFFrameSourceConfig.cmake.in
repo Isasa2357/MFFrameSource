@@ -1,0 +1,20 @@
+@PACKAGE_INIT@
+
+# MFFrameSource::D3D11 and MFFrameSource::D3D12 are static libraries that are
+# intentionally built on top of caller-supplied D3DHelper and ThreadKit targets.
+# Provide the required targets before find_package(MFFrameSource) or add this
+# project as a subdirectory.
+if(NOT TARGET ThreadKit::ThreadKit)
+    message(FATAL_ERROR "MFFrameSource requires target ThreadKit::ThreadKit to exist before package import.")
+endif()
+if(NOT TARGET D3D11Helper::D3D11Helper)
+    message(FATAL_ERROR "MFFrameSource D3D11 backend requires target D3D11Helper::D3D11Helper to exist before package import.")
+endif()
+if(NOT TARGET D3D12Helper::D3D12Helper)
+    message(FATAL_ERROR "MFFrameSource D3D12 backend requires target D3D12Helper::D3D12Helper to exist before package import.")
+endif()
+
+include("${CMAKE_CURRENT_LIST_DIR}/MFFrameSourceTargets.cmake")
+
+set(MFFrameSource_D3D11_SHADER_DIR "${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_DATADIR@/MFFrameSource/shaders/D3D11Processing")
+set(MFFrameSource_D3D12_SHADER_DIR "${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_DATADIR@/MFFrameSource/shaders/D3D12Processing")
