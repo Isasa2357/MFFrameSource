@@ -5,8 +5,7 @@
 #include <MFFrameSource/MFD3D12CameraCapture.hpp>
 
 #include <D3D12Helper/D3D12Core/D3D12Core.hpp>
-#include <D3D12Helper/D3D12Framework/D3D12DescriptorAllocator.hpp>
-#include <D3D12Helper/D3D12Framework/D3D12Helpers.hpp>
+#include <D3D12Helper/D3D12Gpu/D3D12Gpu.hpp>
 
 #include <memory>
 #include <mutex>
