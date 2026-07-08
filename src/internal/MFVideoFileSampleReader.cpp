@@ -64,12 +64,41 @@ std::wstring FormatRequestText(const MFCameraFormatRequest& request) {
     return ss.str();
 }
 
+std::wstring FormatInfoText(const MFCameraFormatInfo& info) {
+    std::wstringstream ss;
+    ss << L"width=" << info.width
+       << L" height=" << info.height
+       << L" fps=" << info.fps.numerator << L"/" << info.fps.denominator
+       << L" subtypeDxgi=" << DxgiFormatName(info.dxgiFormat);
+    return ss.str();
+}
+
 void SetExactVideoType(IMFMediaType* type, const MFCameraFormatRequest& request) {
     ThrowIfFailed(type->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video), L"SetGUID(MF_MT_MAJOR_TYPE)");
     ThrowIfFailed(type->SetGUID(MF_MT_SUBTYPE, request.subtype), L"SetGUID(MF_MT_SUBTYPE)");
     ThrowIfFailed(MFSetAttributeSize(type, MF_MT_FRAME_SIZE, request.width, request.height), L"MFSetAttributeSize(MF_MT_FRAME_SIZE)");
     ThrowIfFailed(MFSetAttributeRatio(type, MF_MT_FRAME_RATE, request.fps.numerator, request.fps.denominator), L"MFSetAttributeRatio(MF_MT_FRAME_RATE)");
     ThrowIfFailed(type->SetUINT32(MF_MT_INTERLACE_MODE, static_cast<UINT32>(MFVideoInterlace_Progressive)), L"SetUINT32(MF_MT_INTERLACE_MODE)");
+}
+
+MFCameraFormatInfo ReadCurrentVideoFormat(IMFSourceReader* reader, const wchar_t* where) {
+    ComPtr<IMFMediaType> actual;
+    ThrowIfFailed(reader->GetCurrentMediaType(kFirstVideoStream, &actual), where);
+
+    MFCameraFormatInfo info;
+    actual->GetGUID(MF_MT_SUBTYPE, &info.subtype);
+    ReadFrameSize(actual.Get(), info.width, info.height);
+    info.fps = ReadFrameRate(actual.Get());
+    info.dxgiFormat = MfSubtypeToDxgiFormat(info.subtype);
+    return info;
+}
+
+bool IsCompatibleDecodedFormatAfterChange(const MFCameraFormatInfo& before,
+                                          const MFCameraFormatInfo& after) noexcept {
+    return GuidEquals(before.subtype, after.subtype) &&
+           before.width == after.width &&
+           before.height == after.height &&
+           IsSupportedCpuUploadInputFormat(after.dxgiFormat);
 }
 
 } // namespace
@@ -144,37 +173,25 @@ void MFVideoFileSampleReader::configureExactDecodedFormat(const MFCameraFormatRe
         throw std::runtime_error(WideToUtf8(msgw));
     }
 
-    ComPtr<IMFMediaType> actual;
-    ThrowIfFailed(reader_->GetCurrentMediaType(kFirstVideoStream, &actual), L"GetCurrentMediaType(decoded output)");
+    const MFCameraFormatInfo actual = ReadCurrentVideoFormat(reader_.Get(), L"GetCurrentMediaType(decoded output)");
 
-    GUID subtype = GUID_NULL;
-    actual->GetGUID(MF_MT_SUBTYPE, &subtype);
-    UINT width = 0, height = 0;
-    ReadFrameSize(actual.Get(), width, height);
-    MFFrameRate fps = ReadFrameRate(actual.Get());
-    const DXGI_FORMAT dxgi = MfSubtypeToDxgiFormat(subtype);
-
-    if (!GuidEquals(subtype, request.subtype) || width != request.width || height != request.height || !(fps == request.fps)) {
+    if (!GuidEquals(actual.subtype, request.subtype) ||
+        actual.width != request.width ||
+        actual.height != request.height ||
+        !(actual.fps == request.fps)) {
         std::wstringstream ss;
         ss << L"Decoded video output does not exactly match request. Requested "
            << FormatRequestText(request)
-           << L". Actual width=" << width
-           << L" height=" << height
-           << L" fps=" << fps.numerator << L"/" << fps.denominator
-           << L" subtypeDxgi=" << DxgiFormatName(dxgi);
+           << L". Actual " << FormatInfoText(actual);
         const auto msgw = ss.str();
         throw std::runtime_error(WideToUtf8(msgw));
     }
 
-    if (!IsSupportedCpuUploadInputFormat(dxgi)) {
+    if (!IsSupportedCpuUploadInputFormat(actual.dxgiFormat)) {
         throw std::runtime_error("MFVideoFileSampleReader::configureExactDecodedFormat: exact decoded output is unsupported by CPU upload path");
     }
 
-    selectedFormat_.subtype = subtype;
-    selectedFormat_.dxgiFormat = dxgi;
-    selectedFormat_.width = width;
-    selectedFormat_.height = height;
-    selectedFormat_.fps = fps;
+    selectedFormat_ = actual;
 }
 
 MFCpuSampleReadResult MFVideoFileSampleReader::read() {
@@ -186,37 +203,56 @@ MFCpuSampleReadResult MFVideoFileSampleReader::read() {
     }
 
     try {
-        DWORD streamIndex = 0;
-        DWORD flags = 0;
-        LONGLONG sampleTime = -1;
-        ComPtr<IMFSample> sample;
-        HRESULT hr = reader_->ReadSample(kFirstVideoStream, 0,
-                                          &streamIndex, &flags, &sampleTime, &sample);
-        ThrowIfFailed(hr, L"IMFSourceReader::ReadSample(video)");
+        for (int attempt = 0; attempt < 8; ++attempt) {
+            DWORD streamIndex = 0;
+            DWORD flags = 0;
+            LONGLONG sampleTime = -1;
+            ComPtr<IMFSample> sample;
+            HRESULT hr = reader_->ReadSample(kFirstVideoStream, 0,
+                                              &streamIndex, &flags, &sampleTime, &sample);
+            ThrowIfFailed(hr, L"IMFSourceReader::ReadSample(video)");
 
-        if (flags & MF_SOURCE_READERF_ENDOFSTREAM) {
-            result.status = MFFrameStatus::EndOfStream;
-            return result;
-        }
-        if (flags & MF_SOURCE_READERF_CURRENTMEDIATYPECHANGED) {
-            result.status = MFFrameStatus::FormatChanged;
-            result.error = MakeError(L"MFVideoFileSampleReader::read", L"current media type changed");
-            return result;
-        }
-        if (flags & MF_SOURCE_READERF_ERROR) {
-            result.status = MFFrameStatus::Error;
-            result.error = MakeError(L"MFVideoFileSampleReader::read", L"MF_SOURCE_READERF_ERROR was returned");
-            return result;
-        }
-        if (!sample) {
-            result.status = MFFrameStatus::NoSample;
+            if (flags & MF_SOURCE_READERF_ENDOFSTREAM) {
+                result.status = MFFrameStatus::EndOfStream;
+                return result;
+            }
+            if (flags & MF_SOURCE_READERF_ERROR) {
+                result.status = MFFrameStatus::Error;
+                result.error = MakeError(L"MFVideoFileSampleReader::read", L"MF_SOURCE_READERF_ERROR was returned");
+                return result;
+            }
+            if (flags & MF_SOURCE_READERF_CURRENTMEDIATYPECHANGED) {
+                const MFCameraFormatInfo changed = ReadCurrentVideoFormat(reader_.Get(), L"GetCurrentMediaType(after CURRENTMEDIATYPECHANGED)");
+                if (!IsCompatibleDecodedFormatAfterChange(selectedFormat_, changed)) {
+                    std::wstringstream ss;
+                    ss << L"current media type changed to an incompatible format. Previous "
+                       << FormatInfoText(selectedFormat_)
+                       << L". Current " << FormatInfoText(changed);
+                    result.status = MFFrameStatus::FormatChanged;
+                    result.error = MakeError(L"MFVideoFileSampleReader::read", ss.str());
+                    return result;
+                }
+
+                // Some decoders adjust non-layout metadata such as frame rate after the first read.
+                // Width / height / subtype remain compatible with the upload path, so continue.
+                selectedFormat_ = changed;
+                if (!sample) {
+                    continue;
+                }
+            }
+            if (!sample) {
+                result.status = MFFrameStatus::NoSample;
+                return result;
+            }
+
+            LONGLONG duration = -1;
+            sample->GetSampleDuration(&duration);
+            result.sample = lockSample(sample.Get(), sampleTime, duration);
+            result.status = MFFrameStatus::Ok;
             return result;
         }
 
-        LONGLONG duration = -1;
-        sample->GetSampleDuration(&duration);
-        result.sample = lockSample(sample.Get(), sampleTime, duration);
-        result.status = MFFrameStatus::Ok;
+        result.status = MFFrameStatus::NoSample;
         return result;
     } catch (const HResultException& e) {
         result.status = MFFrameStatus::Error;
