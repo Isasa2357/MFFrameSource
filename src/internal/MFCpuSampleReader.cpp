@@ -184,9 +184,7 @@ void MFCpuSampleReader::selectExactNativeFormat(const MFCameraFormatRequest& req
     }
 
     if (!any) available << L" <none>";
-    const auto msgw = available.str();
-    const std::string msg(msgw.begin(), msgw.end());
-    throw std::runtime_error(std::string("MFCpuSampleReader: ") + msg);
+    throw std::runtime_error(std::string("MFCpuSampleReader: ") + WideToUtf8(available.str()));
 }
 
 MFCpuSampleReadResult MFCpuSampleReader::read() {
