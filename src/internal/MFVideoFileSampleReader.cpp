@@ -126,8 +126,7 @@ void MFVideoFileSampleReader::configureExactDecodedFormat(const MFCameraFormatRe
            << FormatRequestText(request) << L". HRESULT=0x" << std::hex
            << static_cast<unsigned long>(hr)
            << L". The file may not be decodable to the requested CPU format without a converter/decoder.";
-        const auto msgw = ss.str();
-        throw std::runtime_error(std::string(msgw.begin(), msgw.end()));
+        throw std::runtime_error(WideToUtf8(ss.str()));
     }
 
     ComPtr<IMFMediaType> actual;
@@ -148,8 +147,7 @@ void MFVideoFileSampleReader::configureExactDecodedFormat(const MFCameraFormatRe
            << L" height=" << height
            << L" fps=" << fps.numerator << L"/" << fps.denominator
            << L" subtypeDxgi=" << DxgiFormatName(dxgi);
-        const auto msgw = ss.str();
-        throw std::runtime_error(std::string(msgw.begin(), msgw.end()));
+        throw std::runtime_error(WideToUtf8(ss.str()));
     }
 
     if (!IsSupportedCpuUploadInputFormat(dxgi)) {
