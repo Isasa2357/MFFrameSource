@@ -55,11 +55,24 @@ inline MFErrorInfo MakeError(std::wstring where, std::wstring message) {
 
 inline std::wstring Utf8ToWide(const std::string& s) {
     if (s.empty()) return {};
-    const int len = MultiByteToWideChar(CP_UTF8, 0, s.data(), static_cast<int>(s.size()), nullptr, 0);
+    const int len = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, s.data(), static_cast<int>(s.size()), nullptr, 0);
     if (len <= 0) return L"<utf8 conversion failed>";
     std::wstring w(static_cast<size_t>(len), L'\0');
-    MultiByteToWideChar(CP_UTF8, 0, s.data(), static_cast<int>(s.size()), w.data(), len);
+    if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, s.data(), static_cast<int>(s.size()), w.data(), len) != len) {
+        return L"<utf8 conversion failed>";
+    }
     return w;
+}
+
+inline std::string WideToUtf8(const std::wstring& s) {
+    if (s.empty()) return {};
+    const int len = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, s.data(), static_cast<int>(s.size()), nullptr, 0, nullptr, nullptr);
+    if (len <= 0) return "<wide conversion failed>";
+    std::string utf8(static_cast<size_t>(len), '\0');
+    if (WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, s.data(), static_cast<int>(s.size()), utf8.data(), len, nullptr, nullptr) != len) {
+        return "<wide conversion failed>";
+    }
+    return utf8;
 }
 
 inline bool GuidEquals(const GUID& a, const GUID& b) noexcept {
